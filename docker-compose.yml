@@ -1,0 +1,62 @@
+services:
+  fastnetpay_db:
+    image: mysql:8.0
+    container_name: fastnetpay_db
+    restart: always
+    environment:
+      # Local development only. Production should use a dedicated non-root DB user.
+      MYSQL_ROOT_PASSWORD: root1234
+      MYSQL_DATABASE: fast_pay_net
+    ports:
+      - "3309:3306"
+    volumes:
+      - fastnetpay_db_data:/var/lib/mysql
+      - ./install/phpnuxbill.sql:/docker-entrypoint-initdb.d/01-phpnuxbill.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-proot1234"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  fastnetpay_app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fastnetpay_app
+    restart: always
+    ports:
+      - "8088:80"
+    environment:
+      APP_NAME: FASTNETPAY
+      APP_STAGE: Dev
+      APP_DISPLAY_ERRORS: "1"
+      DB_HOST: fastnetpay_db
+      DB_PORT: 3306
+      DB_NAME: fast_pay_net
+      DB_USER: root
+      DB_PASSWORD: root1234
+      TZ: Africa/Nairobi
+    volumes:
+      - ./:/var/www/html
+    depends_on:
+      fastnetpay_db:
+        condition: service_healthy
+
+  fastnetpay_pma:
+    image: phpmyadmin/phpmyadmin
+    container_name: fastnetpay_pma
+    restart: always
+    environment:
+      PMA_HOST: fastnetpay_db
+      PMA_PORT: 3306
+      PMA_ABSOLUTE_URI: http://localhost:8089/
+      MYSQL_ROOT_PASSWORD: root1234
+    ports:
+      - "8089:80"
+    depends_on:
+      fastnetpay_db:
+        condition: service_healthy
+
+volumes:
+  fastnetpay_db_data:
+    name: fastnetpay_db_data

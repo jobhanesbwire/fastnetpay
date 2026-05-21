@@ -1,0 +1,7 @@
+FASTNETPAY M-Pesa STK Push Payment Gateway
+
+This payment gateway plugin is created for use with PHPNuxBill-derived FASTNETPAY installations.
+
+PHPNuxBill license notices and copyright headers must be preserved. The parent project is licensed under the GNU General Public License version 2. Keep the root project LICENSE file with any distribution of FASTNETPAY or derivative plugin bundles.
+
+This plugin is provided without warranty. You are responsible for Safaricom Daraja compliance, secure credential handling, callback exposure, and production database/user hardening.

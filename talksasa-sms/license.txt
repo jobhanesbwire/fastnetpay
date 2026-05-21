@@ -1,0 +1,3 @@
+This FASTNETPAY TALKSASA SMS gateway plugin is provided for use with the FASTNETPAY/PHPNuxBill project.
+
+Preserve the original PHPNuxBill license notices in the main application. This plugin only adds TALKSASA SMS integration.

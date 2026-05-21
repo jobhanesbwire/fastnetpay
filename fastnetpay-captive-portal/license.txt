@@ -1,0 +1,3 @@
+This FASTNETPAY captive portal theme package is provided for use with the FASTNETPAY/PHPNuxBill project.
+
+Preserve the original PHPNuxBill license notices in the main application. This package only adds presentation templates and MikroTik hotspot starter files.

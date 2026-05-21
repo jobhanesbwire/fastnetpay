@@ -1,0 +1,35 @@
+FASTNETPAY TALKSASA SMS Gateway Installation
+
+ZIP structure expected by PHPNuxBill Plugin Manager:
+
+plugin/
+  talksasa.php
+  ui/
+    talksasa.tpl
+changelog.txt
+install.txt
+license.txt
+README.md
+
+Install steps:
+
+1. Zip the contents of this folder:
+   cd talksasa-sms
+   zip -r ../talksasa-sms.zip plugin changelog.txt install.txt license.txt README.md
+
+2. Upload talksasa-sms.zip through PHPNuxBill Plugin Manager.
+
+3. Open TALKSASA SMS in the admin menu.
+
+4. Configure:
+   - API TOKEN
+   - API ENDPOINT
+   - SENDER_ID
+
+5. Save. Existing PHPNuxBill SMS actions will use TALKSASA when sms_gateway/sms_url is set to talksasa.
+
+Security notes:
+
+- Do not paste API TOKEN in screenshots, logs, issues, or frontend templates.
+- Use HTTPS for the endpoint in production.
+- Review message logs for safe error messages only.

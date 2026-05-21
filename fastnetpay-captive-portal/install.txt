@@ -1,0 +1,35 @@
+FASTNETPAY Captive Portal Theme Installation
+
+ZIP structure expected by PHPNuxBill Plugin Manager:
+
+theme/
+  fastnetpay-captive/
+    home.tpl
+    order.tpl
+    customer/
+      dashboard.tpl
+      orderPlan.tpl
+      selectGateway.tpl
+    assets/
+      css/
+        fastnetpay-captive.css
+changelog.txt
+install.txt
+license.txt
+README.md
+
+Install steps:
+
+1. Zip the contents of this folder, not the parent folder:
+   cd fastnetpay-captive-portal
+   zip -r ../fastnetpay-captive-portal.zip theme mikrotik-hotspot changelog.txt install.txt license.txt README.md
+
+2. Upload fastnetpay-captive-portal.zip through PHPNuxBill Plugin Manager.
+
+3. Open admin settings and select fastnetpay-captive as the active theme.
+
+4. Edit MikroTik hotspot files separately before uploading them to a router:
+   - Replace https://fastnetpay.example.com with your public FASTNETPAY URL.
+   - Upload mikrotik-hotspot contents into the active MikroTik hotspot HTML directory.
+
+5. Keep MPESA STK Push enabled if customers should pay through M-Pesa from the captive portal.

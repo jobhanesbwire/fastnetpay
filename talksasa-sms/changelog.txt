@@ -1,0 +1,4 @@
+1.0.0
+- Added TALKSASA SMS gateway plugin.
+- Added admin settings for API TOKEN, API ENDPOINT, and SENDER_ID.
+- Added Kenyan phone number normalization and multi-recipient support.

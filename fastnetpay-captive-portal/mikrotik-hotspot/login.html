@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FASTNETPAY WiFi Login</title>
+    <link rel="stylesheet" href="assets/css/fastnetpay-hotspot.css">
+</head>
+<body>
+    <main class="page">
+        <section class="portal">
+            <div class="hero">
+                <div class="brand">
+                    <span class="wifi-mark">)))</span>
+                    <div>
+                        <strong>FASTNETPAY</strong>
+                        <p>Secure WiFi access</p>
+                    </div>
+                </div>
+                <h1>Connect to the internet</h1>
+                <p>Login with your voucher or buy a package through FASTNETPAY.</p>
+            </div>
+            <div class="body">
+                $(if error)<p class="notice error">$(error)</p>$(endif)
+                <form name="login" action="$(link-login-only)" method="post">
+                    <input type="hidden" name="dst" value="$(link-orig)">
+                    <input type="hidden" name="popup" value="true">
+                    <label for="username">Username</label>
+                    <input id="username" name="username" type="text" value="$(username)" autocomplete="username" required>
+                    <label for="password">Password</label>
+                    <input id="password" name="password" type="password" autocomplete="current-password">
+                    <button class="btn btn-primary" type="submit">Login</button>
+                </form>
+                <a class="btn btn-secondary" href="https://fastnetpay.example.com/index.php?_route=order/package">Buy internet package</a>
+                <p class="footer">Replace the package URL with your public FASTNETPAY domain before uploading to MikroTik.</p>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

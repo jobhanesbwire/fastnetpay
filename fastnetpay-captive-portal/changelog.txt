@@ -1,0 +1,4 @@
+1.0.0
+- Added FASTNETPAY mobile-first captive portal theme.
+- Added customer dashboard, package selection, and payment gateway selection overrides.
+- Added separate MikroTik hotspot HTML starter files.

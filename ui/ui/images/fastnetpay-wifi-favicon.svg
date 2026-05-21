@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="FASTNETPAY WiFi">
+  <rect width="64" height="64" rx="12" fill="#41a146"/>
+  <path d="M14 25.5c10.4-9.4 25.6-9.4 36 0" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round"/>
+  <path d="M22 34c5.8-5 14.2-5 20 0" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round"/>
+  <path d="M29 42.5c1.8-1.4 4.2-1.4 6 0" fill="none" stroke="#f9c02b" stroke-width="5.5" stroke-linecap="round"/>
+  <circle cx="32" cy="50" r="4.5" fill="#f9c02b"/>
+</svg>

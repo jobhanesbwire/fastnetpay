@@ -1,0 +1,45 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Local PHPNuxBill credentials. Keep config.sample.php committed.
+config.php
+
+# Dependency and build outputs.
+/vendor/
+system/vendor/
+node_modules/
+
+# Runtime cache, logs, uploads, and temp files.
+cache/*
+storage/logs/*
+logs/*
+uploads/tmp/*
+test-results/
+system/cache/*
+ui/cache/*
+ui/compiled/*
+qrcode/cache/*
+system/uploads/_sysfrm_tmp_/*
+!system/uploads/_sysfrm_tmp_/index.html
+system/uploads/tmp/*
+ui/ui/admin/logs/*.log
+ui/ui/admin/logs/*.txt
+
+!system/cache/index.html
+!ui/cache/index.html
+
+# Database dumps and local backups.
+*.sql
+*.sql.gz
+*.dump
+*.bak
+*.backup
+!install/*.sql
+dump/
+dumps/
+backups/
+
+# Docker/local overrides.
+docker-compose.override.yml

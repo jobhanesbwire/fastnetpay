@@ -1,0 +1,16 @@
+{
+    "name": "fastnetpay/fastnetpay",
+    "type": "template",
+    "description": "FASTNETPAY, a PHPNuxBill-based WiFi, PPPoE, and Hotspot billing platform.",
+    "keywords": ["template","FASTNETPAY","PHPNuxBill","Mikrotik","Hotspot","PPPoE","Billing"],
+    "homepage": "https://github.com/fastnetpay/fastnetpay",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "ibnux",
+            "email": "me@ibnux.net",
+            "homepage": "https://ibnux.net",
+            "role": "Developer"
+        }
+    ]
+}

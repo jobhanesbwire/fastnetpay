@@ -1,0 +1,52 @@
+FASTNETPAY M-Pesa STK Push Installation
+
+ZIP structure expected by PHPNuxBill Plugin Manager:
+
+paymentgateway/
+  mpesastkpush.php
+  ui/
+    mpesastkpush.tpl
+changelog.txt
+install.txt
+license.txt
+README.md
+
+Install steps:
+
+1. Zip the contents of this folder, not the parent folder:
+   cd mpesa-stk-push
+   zip -r ../mpesa-stk-push.zip paymentgateway changelog.txt install.txt license.txt README.md
+
+2. In FASTNETPAY/PHPNuxBill admin, open Plugin Manager and upload mpesa-stk-push.zip.
+
+3. Open Payment Gateway, select M-Pesa STK Push, then save:
+   - Environment: sandbox or live
+   - Paybill/Till shortcode
+   - Daraja Consumer Key
+   - Daraja Consumer Secret
+   - Daraja Online Passkey
+   - Callback URL
+   - Walled garden domains for Safaricom/Daraja
+
+4. Return to Payment Gateway and tick M-Pesa STK Push (mpesastkpush) as active.
+
+Database notes:
+
+- No new table is required on current PHPNuxBill builds.
+- The plugin stores pending and paid state in tbl_payment_gateway:
+  gateway_trx_id, pg_url_payment, pg_request, pg_paid_response, status, paid_date, trx_invoice.
+- If an older install lacks these columns, upgrade PHPNuxBill or add the missing columns before enabling the gateway.
+
+Security notes:
+
+- Do not use local/test Daraja credentials in production.
+- Production callbacks must use a public HTTPS URL.
+- Change default FASTNETPAY/PHPNuxBill admin credentials immediately.
+- Use a non-root database user in production.
+- Do not expose Consumer Secret or Passkey in templates, screenshots, tickets, logs, or router pages.
+
+MikroTik captive portal note:
+
+- PHPNuxBill activates the user/package through its existing Package::rechargeUser() flow after M-Pesa confirms payment.
+- If your MikroTik hotspot login page redirects unpaid users, point them to the FASTNETPAY customer package/payment page, for example:
+  https://your-domain.example/index.php?_route=order/package

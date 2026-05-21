@@ -1,0 +1,9 @@
+FASTNETPAY M-Pesa STK Push Payment Gateway
+
+1.0.0
+- Added installable PHPNuxBill payment gateway structure.
+- Added admin settings for sandbox/live Daraja credentials, shortcode type, callback URL, STK timeout, and captive portal payment page branding.
+- Added customer-facing M-Pesa phone entry and pending payment page.
+- Added Safaricom Daraja OAuth, STK Push request, callback, status polling, and STK query support.
+- Added idempotent payment activation using PHPNuxBill Package::rechargeUser().
+- Added safe transaction metadata storage using tbl_payment_gateway.
