@@ -1,5 +1,3 @@
-[![ReadMeSupportPalestine](https://raw.githubusercontent.com/Safouene1/support-palestine-banner/master/banner-project.svg)](https://s.id/standwithpalestine)
-
 # FASTNETPAY
 
 FASTNETPAY is a PHPNuxBill-based WiFi, PPPoE, and Hotspot billing platform prepared for local Docker development and future SaaS/multi-tenant work. The upstream PHPNuxBill license and attribution are preserved.
