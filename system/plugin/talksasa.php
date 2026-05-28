@@ -4,7 +4,7 @@
  * FASTNETPAY TALKSASA SMS gateway plugin.
  */
 
-register_menu("TALKSASA SMS", true, "talksasa", 'AFTER_SETTINGS', 'fa fa-envelope');
+// FASTNETPAY renders TALKSASA inside the SMS sidebar group in ui/ui/admin/header.tpl.
 
 function talksasa()
 {

@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="{$app_url}/ui/ui/styles/bootstrap.min.css">
     <link rel="stylesheet" href="{$app_url}/ui/ui/fonts/font-awesome/css/font-awesome.min.css">
     <link rel="stylesheet" href="{$app_url}/ui/ui/styles/modern-AdminLTE.min.css">
-    <link rel="stylesheet" href="{$app_url}/ui/ui/styles/fastnetpay-theme.css?2026.5.21" />
+    <link rel="stylesheet" href="{$app_url}/ui/ui/styles/fastnetpay-theme.css?2026.5.22" />
     <meta http-equiv="refresh" content="{$time}; url={$url}">
 </head>
 

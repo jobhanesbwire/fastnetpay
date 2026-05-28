@@ -15,6 +15,56 @@ if (!in_array($admin['user_type'], ['SuperAdmin', 'Admin'])) {
     _alert(Lang::T('You do not have permission to access this page'), 'danger', "dashboard");
 }
 
+function fnp_sync_service_plan_to_router($plan, $routerName)
+{
+    global $_app_stage, $DEVICE_PATH;
+
+    $planData = method_exists($plan, 'as_array') ? $plan->as_array() : (array) $plan;
+    $planData['routers'] = $routerName;
+    if (empty($planData['device'])) {
+        $planData['device'] = $planData['type'] == 'PPPOE' ? 'MikrotikPppoe' : 'MikrotikHotspot';
+    }
+
+    if ($_app_stage == 'demo' || $_app_stage == 'Demo') {
+        return 'SKIPPED : ' . $planData['name_plan'] . ' on ' . $routerName . ' | Demo mode<br>';
+    }
+
+    $dvc = $DEVICE_PATH . DIRECTORY_SEPARATOR . $planData['device'] . '.php';
+    if (!file_exists($dvc)) {
+        return 'FAILED : ' . $planData['name_plan'] . ' on ' . $routerName . ' | Device Not Found: ' . $planData['device'] . '<br>';
+    }
+
+    try {
+        require_once $dvc;
+        if (!class_exists($planData['device'])) {
+            return 'FAILED : ' . $planData['name_plan'] . ' on ' . $routerName . ' | Device class not found: ' . $planData['device'] . '<br>';
+        }
+        (new $planData['device'])->add_plan($planData);
+        return 'DONE : ' . $planData['name_plan'] . ' on ' . $routerName . ' (' . $planData['device'] . ')<br>';
+    } catch (Throwable $e) {
+        return 'FAILED : ' . $planData['name_plan'] . ' on ' . $routerName . ' | ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '<br>';
+    }
+}
+
+function fnp_sync_service_plan($plan)
+{
+    $routerName = trim((string) $plan['routers']);
+    if ($routerName !== '') {
+        return fnp_sync_service_plan_to_router($plan, $routerName);
+    }
+
+    $routers = ORM::for_table('tbl_routers')->where('enabled', '1')->find_many();
+    if (!$routers) {
+        return 'FAILED : ' . $plan['name_plan'] . ' | No enabled routers found<br>';
+    }
+
+    $log = '';
+    foreach ($routers as $router) {
+        $log .= fnp_sync_service_plan_to_router($plan, $router['name']);
+    }
+    return $log;
+}
+
 switch ($action) {
     case 'sync':
         set_time_limit(-1);
@@ -22,32 +72,14 @@ switch ($action) {
             $plans = ORM::for_table('tbl_plans')->where('type', 'Hotspot')->find_many();
             $log = '';
             foreach ($plans as $plan) {
-                $dvc = Package::getDevice($plan);
-                if ($_app_stage != 'demo') {
-                    if (file_exists($dvc)) {
-                        require_once $dvc;
-                        (new $plan['device'])->add_plan($plan);
-                        $log .= "DONE : $plan[name_plan], $plan[device]<br>";
-                    } else {
-                        $log .= "FAILED : $plan[name_plan], $plan[device] | Device Not Found<br>";
-                    }
-                }
+                $log .= fnp_sync_service_plan($plan);
             }
             r2(getUrl('services/hotspot'), 's', $log);
         } else if ($routes['2'] == 'pppoe') {
             $plans = ORM::for_table('tbl_plans')->where('type', 'PPPOE')->find_many();
             $log = '';
             foreach ($plans as $plan) {
-                $dvc = Package::getDevice($plan);
-                if ($_app_stage != 'demo') {
-                    if (file_exists($dvc)) {
-                        require_once $dvc;
-                        (new $plan['device'])->add_plan($plan);
-                        $log .= "DONE : $plan[name_plan], $plan[device]<br>";
-                    } else {
-                        $log .= "FAILED : $plan[name_plan], $plan[device] | Device Not Found<br>";
-                    }
-                }
+                $log .= fnp_sync_service_plan($plan);
             }
             r2(getUrl('services/pppoe'), 's', $log);
         }

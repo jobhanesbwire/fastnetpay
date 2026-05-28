@@ -5,122 +5,60 @@ use PEAR2\Net\RouterOS\Client;
 use PEAR2\Net\RouterOS\Request;
 
 
-register_menu(" MikroTik Monitor", true, "mikrotik_monitor_ui", 'AFTER_SETTINGS', 'ion ion-wifi', "New", "green");
+// FASTNETPAY renders MikroTik monitoring as a first-class sidebar group in ui/ui/admin/header.tpl.
 
 function mikrotik_monitor_ui()
 {
     global $ui, $routes;
     _admin();
-    $ui->assign('_title', 'Mikrotik Router Monitor');
-    $ui->assign('_system_menu', 'Router Monitor');
     $admin = Admin::_info();
+    mikrotik_monitor_require_admin($admin);
+    $routers = mikrotik_monitor_enabled_routers();
+    $router = mikrotik_monitor_selected_router($routers, $routes['2'] ?? null);
+    $ui->assign('_title', 'Mikrotik Dashboard');
+    $ui->assign('_system_menu', 'network');
     $ui->assign('_admin', $admin);
-    $routers = ORM::for_table('tbl_routers')->where('enabled', '1')->find_many();
-    $router = $routes['2'];
-    if (empty($router)) {
-        $router = $routers[0]['id'];
-    }
-    $ui->assign('xheader', '
-    <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.11.3/css/jquery.dataTables.min.css">
-    <style>
-        .card-container {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 1rem;
-        }
-        .card {
-            flex: 1 1 calc(33.333% - 1rem);
-            margin-bottom: 1rem;
-            background-color: #fff;
-            border: 1px solid #ddd;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-            transition: transform 0.3s ease;
-        }
-        .card:hover {
-            transform: translateY(-5px);
-        }
-        .card-header-bg-info {
-            background-color: #0d6efd; /* Bootstrap primary color */
-            color: #fff;
-            padding: 15px;
-            border-top-left-radius: 10px;
-            border-top-right-radius: 10px;
-        }
-        .card-header-bg-success {
-            background-color: #009174; /* Bootstrap primary color */
-            color: #fff;
-            padding: 15px;
-            border-top-left-radius: 10px;
-            border-top-right-radius: 10px;
-        }
-        .card-header-bg-warning {
-            background-color: #d0d414; /* Bootstrap primary color */
-            color: #fff;
-            padding: 15px;
-            border-top-left-radius: 10px;
-            border-top-right-radius: 10px;
-        }
-        .card-header-bg-danger {
-            background-color: #12b9bd; /* Bootstrap primary color */
-            color: #fff;
-            padding: 15px;
-            border-top-left-radius: 10px;
-            border-top-right-radius: 10px;
-        }
-        .card-body {
-            padding: 15px;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        th,
-        td {
-            padding: 8px;
-            border: 1px solid #ddd;
-            text-align: left;
-        }
-        th.custom-class {
-            background-color: #f2f2f2;
-            color: #000;
-            font-weight: bold;
-        }
-        tr.even-row {
-            background-color: #f2f2f2;
-        }
-        tr.custom-class {
-            color: blue;
-            font-weight: bold;
-        }
-        #ppp-table th,
-        #ppp-table td {
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            width: 100px;
-        }
-        .chart-canvas {
-            width: 100px;
-            height: 80px;
-        }
-        @media only screen and (max-width: 768px) {
-            .card {
-                flex: 1 1 calc(100% - 1rem);
-            }
-        }
-        @media only screen and (min-width: 769px) {
-            .card {
-                flex: 1 1 calc(33.333% - 1rem);
-            }
-        }
-    </style>');
-
     $ui->assign('routers', $routers);
     $ui->assign('router', $router);
-    $interfaces = mikrotik_monitor_get_interfaces_list();
-    $ui->assign('interfaces', $interfaces);
+    $ui->assign('csrf_token', Csrf::generateAndStoreToken());
+    $ui->assign('xfooter', '<script src="' . APP_URL . '/ui/ui/scripts/fastnetpay-monitor.js?2026.5.22"></script>');
     $ui->display('mikrotik_monitor.tpl');
+}
+
+function mikrotik_monitor_pppoe()
+{
+    global $ui, $routes;
+    _admin();
+    $admin = Admin::_info();
+    mikrotik_monitor_require_admin($admin);
+    $routers = mikrotik_monitor_enabled_routers();
+    $router = mikrotik_monitor_selected_router($routers, $routes['2'] ?? null);
+    $ui->assign('_title', 'PPPoE Monitor');
+    $ui->assign('_system_menu', 'network');
+    $ui->assign('_admin', $admin);
+    $ui->assign('routers', $routers);
+    $ui->assign('router', $router);
+    $ui->assign('csrf_token', Csrf::generateAndStoreToken());
+    $ui->assign('xfooter', '<script src="' . APP_URL . '/ui/ui/scripts/fastnetpay-monitor.js?2026.5.22"></script>');
+    $ui->display('mikrotik_pppoe_monitor.tpl');
+}
+
+function mikrotik_monitor_hotspot()
+{
+    global $ui, $routes;
+    _admin();
+    $admin = Admin::_info();
+    mikrotik_monitor_require_admin($admin);
+    $routers = mikrotik_monitor_enabled_routers();
+    $router = mikrotik_monitor_selected_router($routers, $routes['2'] ?? null);
+    $ui->assign('_title', 'Hotspot Monitor');
+    $ui->assign('_system_menu', 'network');
+    $ui->assign('_admin', $admin);
+    $ui->assign('routers', $routers);
+    $ui->assign('router', $router);
+    $ui->assign('csrf_token', Csrf::generateAndStoreToken());
+    $ui->assign('xfooter', '<script src="' . APP_URL . '/ui/ui/scripts/fastnetpay-monitor.js?2026.5.22"></script>');
+    $ui->display('mikrotik_hotspot_monitor.tpl');
 }
 
 function mikrotik_monitor_get_wlan()
@@ -662,6 +600,460 @@ function mikrotik_monitor_get_resources_json()
     header('Content-Type: application/json');
     echo json_encode($data);
 }
+
+function mikrotik_monitor_require_admin($admin)
+{
+    if (!in_array($admin['user_type'], ['SuperAdmin', 'Admin'], true)) {
+        _alert(Lang::T('You do not have permission to access this page'), 'danger', "dashboard");
+        exit;
+    }
+}
+
+function mikrotik_monitor_enabled_routers()
+{
+    return ORM::for_table('tbl_routers')->where('enabled', '1')->order_by_asc('name')->find_many();
+}
+
+function mikrotik_monitor_selected_router($routers, $requested = null)
+{
+    $requested = (int) $requested;
+    foreach ($routers as $router) {
+        if ((int) $router['id'] === $requested) {
+            return (int) $router['id'];
+        }
+    }
+
+    return isset($routers[0]) ? (int) $routers[0]['id'] : 0;
+}
+
+function mikrotik_monitor_router($routerId)
+{
+    if (!$routerId) {
+        return null;
+    }
+    return ORM::for_table('tbl_routers')->where('enabled', '1')->find_one((int) $routerId);
+}
+
+function mikrotik_monitor_json($data, $status = 200)
+{
+    http_response_code($status);
+    header('Content-Type: application/json');
+    echo json_encode($data);
+    exit;
+}
+
+function mikrotik_monitor_client($routerId)
+{
+    global $_app_stage;
+    $router = mikrotik_monitor_router($routerId);
+    if (!$router) {
+        throw new Exception('Router not found or disabled.');
+    }
+    if ($_app_stage == 'demo') {
+        throw new Exception('Router API is disabled in demo mode.');
+    }
+    $ipParts = explode(':', $router['ip_address']);
+    $host = $ipParts[0];
+    $port = isset($ipParts[1]) && $ipParts[1] !== '' ? (int) $ipParts[1] : 8728;
+    return new Client($host, $router['username'], $router['password'], $port, false, 3);
+}
+
+function mikrotik_monitor_rows($client, $path)
+{
+    $response = $client->sendSync(new RouterOS\Request($path));
+    $rows = [];
+    foreach ($response as $row) {
+        $rows[] = $row;
+    }
+    return $rows;
+}
+
+function mikrotik_monitor_prop($row, $property, $default = '')
+{
+    if (!$row || !method_exists($row, 'getProperty')) {
+        return $default;
+    }
+    $value = $row->getProperty($property);
+    return $value === null || $value === '' ? $default : $value;
+}
+
+function mikrotik_monitor_safe($value)
+{
+    return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
+}
+
+function mikrotik_monitor_bool($value)
+{
+    return $value === true || $value === 'true' || $value === 'yes';
+}
+
+function mikrotik_monitor_router_payload($router)
+{
+    if (!$router) {
+        return null;
+    }
+
+    return [
+        'id' => (int) $router['id'],
+        'name' => $router['name'],
+        'ip_address' => $router['ip_address'],
+        'status' => $router['status'],
+        'last_seen' => $router['last_seen'],
+        'description' => $router['description'],
+    ];
+}
+
+function mikrotik_monitor_interfaces_payload($interfaces)
+{
+    $items = [];
+    $trafficTotal = 0;
+    foreach ($interfaces as $interface) {
+        $name = mikrotik_monitor_prop($interface, 'name');
+        if ($name === '') {
+            continue;
+        }
+        $tx = (int) mikrotik_monitor_prop($interface, 'tx-byte', 0);
+        $rx = (int) mikrotik_monitor_prop($interface, 'rx-byte', 0);
+        $trafficTotal += $tx + $rx;
+        $items[] = [
+            'name' => $name,
+            'running' => mikrotik_monitor_bool(mikrotik_monitor_prop($interface, 'running')),
+            'tx' => mikrotik_monitor_formatBytes($tx),
+            'rx' => mikrotik_monitor_formatBytes($rx),
+            'total' => mikrotik_monitor_formatBytes($tx + $rx),
+            'tx_raw' => $tx,
+            'rx_raw' => $rx,
+        ];
+    }
+
+    return [$items, $trafficTotal];
+}
+
+function mikrotik_monitor_snapshot()
+{
+    global $routes;
+    _admin();
+    $routerId = (int) ($routes['2'] ?? 0);
+    $router = mikrotik_monitor_router($routerId);
+    $routers = mikrotik_monitor_enabled_routers();
+
+    $data = [
+        'ok' => true,
+        'router' => mikrotik_monitor_router_payload($router),
+        'routers' => array_map('mikrotik_monitor_router_payload', iterator_to_array($routers)),
+        'router_count' => count($routers),
+        'online_router_count' => (int) ORM::for_table('tbl_routers')->where('enabled', '1')->where('status', 'Online')->count(),
+        'local_hotspot_clients' => (int) ORM::for_table('tbl_customers')->where('service_type', 'Hotspot')->count(),
+        'local_pppoe_clients' => (int) ORM::for_table('tbl_customers')->where('service_type', 'PPPoE')->count(),
+        'active_pppoe' => 0,
+        'active_hotspot' => 0,
+        'total_pppoe' => 0,
+        'total_hotspot' => 0,
+        'hotspot_servers' => 0,
+        'total_traffic' => '0 B',
+        'interfaces' => [],
+        'resource' => [],
+        'error' => '',
+    ];
+
+    if (!$router) {
+        $data['ok'] = false;
+        $data['error'] = 'No enabled router selected.';
+        mikrotik_monitor_json($data);
+    }
+
+    try {
+        $client = mikrotik_monitor_client($routerId);
+        $activePpp = mikrotik_monitor_rows($client, '/ppp/active/print');
+        $activeHotspot = mikrotik_monitor_rows($client, '/ip/hotspot/active/print');
+        $pppSecrets = mikrotik_monitor_rows($client, '/ppp/secret/print');
+        $hotspotUsers = mikrotik_monitor_rows($client, '/ip/hotspot/user/print');
+        $hotspotServers = mikrotik_monitor_rows($client, '/ip/hotspot/print');
+        $interfaces = mikrotik_monitor_rows($client, '/interface/print');
+        list($interfacePayload, $trafficTotal) = mikrotik_monitor_interfaces_payload($interfaces);
+
+        $resourceRows = mikrotik_monitor_rows($client, '/system/resource/print');
+        $resource = $resourceRows[0] ?? null;
+
+        $data['active_pppoe'] = count($activePpp);
+        $data['active_hotspot'] = count($activeHotspot);
+        $data['total_pppoe'] = count($pppSecrets);
+        $data['total_hotspot'] = count($hotspotUsers);
+        $data['hotspot_servers'] = count($hotspotServers);
+        $data['total_traffic'] = mikrotik_monitor_formatBytes($trafficTotal);
+        $data['interfaces'] = $interfacePayload;
+        $data['resource'] = [
+            'uptime' => mikrotik_monitor_prop($resource, 'uptime', 'N/A'),
+            'version' => mikrotik_monitor_prop($resource, 'version', 'N/A'),
+            'cpu_load' => mikrotik_monitor_prop($resource, 'cpu-load', '0'),
+            'free_memory' => mikrotik_monitor_formatBytes((int) mikrotik_monitor_prop($resource, 'free-memory', 0)),
+        ];
+    } catch (Exception $e) {
+        $data['ok'] = false;
+        $data['error'] = 'Router API unavailable: ' . $e->getMessage();
+    }
+
+    mikrotik_monitor_json($data);
+}
+
+function mikrotik_monitor_interface_map($client)
+{
+    $map = [];
+    foreach (mikrotik_monitor_rows($client, '/interface/print') as $interface) {
+        $name = mikrotik_monitor_prop($interface, 'name');
+        if ($name === '') {
+            continue;
+        }
+        $map[$name] = [
+            'tx' => (int) mikrotik_monitor_prop($interface, 'tx-byte', 0),
+            'rx' => (int) mikrotik_monitor_prop($interface, 'rx-byte', 0),
+        ];
+    }
+    return $map;
+}
+
+function mikrotik_monitor_pppoe_data()
+{
+    global $routes;
+    _admin();
+    $routerId = (int) ($routes['2'] ?? 0);
+    $rows = [];
+    $error = '';
+
+    try {
+        $client = mikrotik_monitor_client($routerId);
+        $active = [];
+        foreach (mikrotik_monitor_rows($client, '/ppp/active/print') as $session) {
+            $name = mikrotik_monitor_prop($session, 'name');
+            if ($name === '') {
+                continue;
+            }
+            $active[$name] = $session;
+        }
+
+        $interfaceMap = mikrotik_monitor_interface_map($client);
+        $seen = [];
+        foreach (mikrotik_monitor_rows($client, '/ppp/secret/print') as $secret) {
+            $name = mikrotik_monitor_prop($secret, 'name');
+            if ($name === '') {
+                continue;
+            }
+            $session = $active[$name] ?? null;
+            $interfaceName = '<pppoe-' . $name . '>';
+            $traffic = $interfaceMap[$interfaceName] ?? ['tx' => 0, 'rx' => 0];
+            $disabled = mikrotik_monitor_bool(mikrotik_monitor_prop($secret, 'disabled'));
+            $rows[] = [
+                'username' => $name,
+                'address' => mikrotik_monitor_prop($session, 'address', ''),
+                'uptime' => mikrotik_monitor_prop($session, 'uptime', '-'),
+                'service' => mikrotik_monitor_prop($secret, 'service', mikrotik_monitor_prop($session, 'service', 'pppoe')),
+                'profile' => mikrotik_monitor_prop($secret, 'profile', ''),
+                'caller_id' => mikrotik_monitor_prop($session, 'caller-id', ''),
+                'tx' => mikrotik_monitor_formatBytes($traffic['tx']),
+                'rx' => mikrotik_monitor_formatBytes($traffic['rx']),
+                'total' => mikrotik_monitor_formatBytes($traffic['tx'] + $traffic['rx']),
+                'tx_raw' => $traffic['tx'],
+                'rx_raw' => $traffic['rx'],
+                'status' => $disabled ? 'disabled' : ($session ? 'online' : 'offline'),
+                'comment' => mikrotik_monitor_prop($secret, 'comment', ''),
+            ];
+            $seen[$name] = true;
+        }
+
+        foreach ($active as $name => $session) {
+            if (isset($seen[$name])) {
+                continue;
+            }
+            $interfaceName = '<pppoe-' . $name . '>';
+            $traffic = $interfaceMap[$interfaceName] ?? ['tx' => 0, 'rx' => 0];
+            $rows[] = [
+                'username' => $name,
+                'address' => mikrotik_monitor_prop($session, 'address', ''),
+                'uptime' => mikrotik_monitor_prop($session, 'uptime', '-'),
+                'service' => mikrotik_monitor_prop($session, 'service', 'pppoe'),
+                'profile' => '',
+                'caller_id' => mikrotik_monitor_prop($session, 'caller-id', ''),
+                'tx' => mikrotik_monitor_formatBytes($traffic['tx']),
+                'rx' => mikrotik_monitor_formatBytes($traffic['rx']),
+                'total' => mikrotik_monitor_formatBytes($traffic['tx'] + $traffic['rx']),
+                'tx_raw' => $traffic['tx'],
+                'rx_raw' => $traffic['rx'],
+                'status' => 'online',
+                'comment' => '',
+            ];
+        }
+    } catch (Exception $e) {
+        $error = 'Router API unavailable: ' . $e->getMessage();
+        $customers = ORM::for_table('tbl_customers')->where('service_type', 'PPPoE')->order_by_asc('username')->limit(500)->find_many();
+        foreach ($customers as $customer) {
+            $rows[] = [
+                'username' => $customer['pppoe_username'] ?: $customer['username'],
+                'address' => $customer['pppoe_ip'],
+                'uptime' => '-',
+                'service' => 'pppoe',
+                'profile' => '',
+                'caller_id' => '',
+                'tx' => '0 B',
+                'rx' => '0 B',
+                'total' => '0 B',
+                'tx_raw' => 0,
+                'rx_raw' => 0,
+                'status' => $customer['status'] === 'Active' ? 'offline' : 'disabled',
+                'comment' => $customer['fullname'],
+            ];
+        }
+    }
+
+    $stats = mikrotik_monitor_table_stats($rows);
+    mikrotik_monitor_json(['ok' => $error === '', 'error' => $error, 'stats' => $stats, 'rows' => $rows]);
+}
+
+function mikrotik_monitor_hotspot_data()
+{
+    global $routes;
+    _admin();
+    $routerId = (int) ($routes['2'] ?? 0);
+    $rows = [];
+    $error = '';
+    $serverCount = 0;
+
+    try {
+        $client = mikrotik_monitor_client($routerId);
+        $active = [];
+        foreach (mikrotik_monitor_rows($client, '/ip/hotspot/active/print') as $session) {
+            $name = mikrotik_monitor_prop($session, 'user');
+            if ($name === '') {
+                continue;
+            }
+            $active[$name] = $session;
+        }
+
+        $serverCount = count(mikrotik_monitor_rows($client, '/ip/hotspot/print'));
+        $seen = [];
+        foreach (mikrotik_monitor_rows($client, '/ip/hotspot/user/print') as $user) {
+            $name = mikrotik_monitor_prop($user, 'name');
+            if ($name === '') {
+                continue;
+            }
+            $session = $active[$name] ?? null;
+            $rx = (int) mikrotik_monitor_prop($session, 'bytes-in', 0);
+            $tx = (int) mikrotik_monitor_prop($session, 'bytes-out', 0);
+            $disabled = mikrotik_monitor_bool(mikrotik_monitor_prop($user, 'disabled'));
+            $rows[] = [
+                'username' => $name,
+                'address' => mikrotik_monitor_prop($session, 'address', ''),
+                'mac' => mikrotik_monitor_prop($session, 'mac-address', mikrotik_monitor_prop($user, 'mac-address', '')),
+                'uptime' => mikrotik_monitor_prop($session, 'uptime', '-'),
+                'server' => mikrotik_monitor_prop($session, 'server', mikrotik_monitor_prop($user, 'server', '')),
+                'profile' => mikrotik_monitor_prop($user, 'profile', ''),
+                'rx' => mikrotik_monitor_formatBytes($rx),
+                'tx' => mikrotik_monitor_formatBytes($tx),
+                'total' => mikrotik_monitor_formatBytes($rx + $tx),
+                'rx_raw' => $rx,
+                'tx_raw' => $tx,
+                'status' => $disabled ? 'disabled' : ($session ? 'online' : 'offline'),
+                'comment' => mikrotik_monitor_prop($user, 'comment', ''),
+                'session_time' => mikrotik_monitor_prop($session, 'session-time-left', ''),
+            ];
+            $seen[$name] = true;
+        }
+
+        foreach ($active as $name => $session) {
+            if (isset($seen[$name])) {
+                continue;
+            }
+            $rx = (int) mikrotik_monitor_prop($session, 'bytes-in', 0);
+            $tx = (int) mikrotik_monitor_prop($session, 'bytes-out', 0);
+            $rows[] = [
+                'username' => $name,
+                'address' => mikrotik_monitor_prop($session, 'address', ''),
+                'mac' => mikrotik_monitor_prop($session, 'mac-address', ''),
+                'uptime' => mikrotik_monitor_prop($session, 'uptime', '-'),
+                'server' => mikrotik_monitor_prop($session, 'server', ''),
+                'profile' => '',
+                'rx' => mikrotik_monitor_formatBytes($rx),
+                'tx' => mikrotik_monitor_formatBytes($tx),
+                'total' => mikrotik_monitor_formatBytes($rx + $tx),
+                'rx_raw' => $rx,
+                'tx_raw' => $tx,
+                'status' => 'online',
+                'comment' => '',
+                'session_time' => mikrotik_monitor_prop($session, 'session-time-left', ''),
+            ];
+        }
+    } catch (Exception $e) {
+        $error = 'Router API unavailable: ' . $e->getMessage();
+        $customers = ORM::for_table('tbl_customers')->where('service_type', 'Hotspot')->order_by_asc('username')->limit(500)->find_many();
+        foreach ($customers as $customer) {
+            $rows[] = [
+                'username' => $customer['username'],
+                'address' => '',
+                'mac' => '',
+                'uptime' => '-',
+                'server' => '',
+                'profile' => '',
+                'rx' => '0 B',
+                'tx' => '0 B',
+                'total' => '0 B',
+                'rx_raw' => 0,
+                'tx_raw' => 0,
+                'status' => $customer['status'] === 'Active' ? 'offline' : 'disabled',
+                'comment' => $customer['fullname'],
+                'session_time' => '',
+            ];
+        }
+    }
+
+    $stats = mikrotik_monitor_table_stats($rows);
+    $stats['servers'] = $serverCount;
+    mikrotik_monitor_json(['ok' => $error === '', 'error' => $error, 'stats' => $stats, 'rows' => $rows]);
+}
+
+function mikrotik_monitor_table_stats($rows)
+{
+    $stats = ['total' => count($rows), 'online' => 0, 'offline' => 0, 'disabled' => 0];
+    foreach ($rows as $row) {
+        $status = $row['status'] ?? 'offline';
+        if (!isset($stats[$status])) {
+            $stats[$status] = 0;
+        }
+        $stats[$status]++;
+    }
+    return $stats;
+}
+
+function mikrotik_monitor_disconnect()
+{
+    _admin();
+    $admin = Admin::_info();
+    mikrotik_monitor_require_admin($admin);
+
+    if (!Csrf::check(_post('csrf_token'))) {
+        mikrotik_monitor_json(['ok' => false, 'message' => 'Invalid CSRF token.'], 403);
+    }
+
+    $routerId = (int) _post('router');
+    $username = alphanumeric(_post('username'), '_-@.:');
+    $type = _post('type');
+
+    if (!$routerId || $username === '' || !in_array($type, ['hotspot', 'pppoe'], true)) {
+        mikrotik_monitor_json(['ok' => false, 'message' => 'Invalid disconnect request.'], 422);
+    }
+
+    try {
+        $client = mikrotik_monitor_client($routerId);
+        if ($type === 'hotspot') {
+            Mikrotik::removeHotspotActiveUser($client, $username);
+        } else {
+            Mikrotik::removePpoeActive($client, $username);
+        }
+        _log('[' . $admin['username'] . ']: disconnected ' . $type . ' session for ' . $username, 'Mikrotik Monitor', $admin['id']);
+        mikrotik_monitor_json(['ok' => true, 'message' => 'Session disconnected.']);
+    } catch (Exception $e) {
+        mikrotik_monitor_json(['ok' => false, 'message' => 'Disconnect failed: ' . $e->getMessage()], 500);
+    }
+}
+
 function mikrotik_monitor_fetchLogs($routerId)
 {
     if (!$routerId) {

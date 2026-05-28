@@ -59,10 +59,10 @@
                     <div class="form-group">
                         <label class="col-md-2 control-label">{Lang::T('Voucher Prefix')}</label>
                         <div class="col-md-6">
-                            <input type="text" class="form-control" name="prefix" placeholder="NUX-"
-                                value="{$_c['voucher_prefix']}">
+                            <input type="text" class="form-control" name="prefix" placeholder="FNP-"
+                                value="{if $_c['voucher_prefix']}{$_c['voucher_prefix']}{else}FNP-{/if}">
                         </div>
-                        <p class="help-block col-md-4">NUX-VoUCHeRCOdE</p>
+                        <p class="help-block col-md-4">FNP-VoUCHeRCOdE</p>
                     </div>
                     <div class="form-group">
                         <label class="col-md-2 control-label">{Lang::T('Length Code')}</label>
@@ -107,6 +107,78 @@
 <!-- /voucher-add -->
 
 <script>
+    var fnpVoucherRouters = [
+        {foreach $r as $router}
+        {
+            name: "{$router['name']|escape:'javascript'}"
+        },
+        {/foreach}
+    ];
+    var fnpVoucherPlans = [
+        {foreach $p as $plan}
+        {
+            id: "{$plan['id']|escape:'javascript'}",
+            name: "{$plan['name_plan']|escape:'javascript'}",
+            type: "{$plan['type']|escape:'javascript'}",
+            router: "{$plan['routers']|escape:'javascript'}"
+        },
+        {/foreach}
+    ];
+
+    function fnpVoucherSelectedType() {
+        var checked = document.querySelector('input[name="type"]:checked');
+        return checked ? checked.value : '';
+    }
+
+    function fnpVoucherResetSelect(select, placeholder) {
+        select.innerHTML = '';
+        var option = document.createElement('option');
+        option.value = '';
+        option.textContent = placeholder;
+        select.appendChild(option);
+    }
+
+    function fnpVoucherRefreshRouters() {
+        var server = document.getElementById('server');
+        fnpVoucherResetSelect(server, "{Lang::T('Select Routers')}");
+        fnpVoucherRouters.forEach(function(router) {
+            var option = document.createElement('option');
+            option.value = router.name;
+            option.textContent = router.name;
+            server.appendChild(option);
+        });
+        if (fnpVoucherRouters.length === 1) {
+            server.value = fnpVoucherRouters[0].name;
+        }
+        fnpVoucherRefreshPlans();
+        if (window.jQuery && jQuery.fn.select2) {
+            jQuery('#server').trigger('change.select2');
+        }
+    }
+
+    function fnpVoucherRefreshPlans() {
+        var type = fnpVoucherSelectedType();
+        var server = document.getElementById('server').value;
+        var plan = document.getElementById('plan');
+        fnpVoucherResetSelect(plan, "{Lang::T('Select Plans')}");
+        fnpVoucherPlans.filter(function(item) {
+            return item.type === type && (item.router === '' || item.router === server);
+        }).forEach(function(item) {
+            var option = document.createElement('option');
+            option.value = item.id;
+            option.textContent = item.name + (item.router === '' ? ' (all routers)' : '');
+            plan.appendChild(option);
+        });
+        if (window.jQuery && jQuery.fn.select2) {
+            jQuery('#plan').trigger('change.select2');
+        }
+    }
+
+    document.querySelectorAll('input[name="type"]').forEach(function(input) {
+        input.addEventListener('change', fnpVoucherRefreshRouters);
+    });
+    document.getElementById('server').addEventListener('change', fnpVoucherRefreshPlans);
+
     function showVouchersPerPage() {
         var printNow = document.getElementById('print_now');
         var printers = document.getElementById('printers');
@@ -120,6 +192,8 @@
             printers.style.display = 'none';
         }
     }
+
+    fnpVoucherRefreshRouters();
 </script>
 
 {include file="sections/footer.tpl"}

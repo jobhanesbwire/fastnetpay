@@ -125,6 +125,20 @@ class MikrotikHotspot
 		if ($bw['rate_up'] == '0' || $bw['rate_down'] == '0') {
 			$rate = '';
 		}
+        $printRequest = new RouterOS\Request('/ip/hotspot/user/profile/print');
+        $printRequest->setQuery(RouterOS\Query::where('name', $plan['name_plan']));
+        $profileID = $client->sendSync($printRequest)->getProperty('.id');
+        if (!empty($profileID)) {
+            $setRequest = new RouterOS\Request('/ip/hotspot/user/profile/set');
+            $client->sendSync(
+                $setRequest
+                    ->setArgument('numbers', $profileID)
+                    ->setArgument('shared-users', $plan['shared_users'])
+                    ->setArgument('rate-limit', $rate)
+            );
+            return;
+        }
+
         $addRequest = new RouterOS\Request('/ip/hotspot/user/profile/add');
         $client->sendSync(
             $addRequest

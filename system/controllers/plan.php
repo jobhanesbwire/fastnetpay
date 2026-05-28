@@ -540,7 +540,17 @@ switch ($action) {
         $ui->assign('_title', Lang::T('Add Vouchers'));
         $c = ORM::for_table('tbl_customers')->find_many();
         $ui->assign('c', $c);
-        $p = ORM::for_table('tbl_plans')->where('enabled', '1')->find_many();
+        if (empty($config['voucher_prefix'])) {
+            $config['voucher_prefix'] = 'FNP-';
+            $prefixConfig = ORM::for_table('tbl_appconfig')->where('setting', 'voucher_prefix')->find_one();
+            if (!$prefixConfig) {
+                $prefixConfig = ORM::for_table('tbl_appconfig')->create();
+                $prefixConfig->setting = 'voucher_prefix';
+            }
+            $prefixConfig->value = 'FNP-';
+            $prefixConfig->save();
+        }
+        $p = ORM::for_table('tbl_plans')->where('enabled', '1')->order_by_asc('type')->order_by_asc('name_plan')->find_many();
         $ui->assign('p', $p);
         $r = ORM::for_table('tbl_routers')->where('enabled', '1')->find_many();
         $ui->assign('r', $r);

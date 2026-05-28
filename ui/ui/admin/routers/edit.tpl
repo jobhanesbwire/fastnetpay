@@ -4,7 +4,13 @@
 <div class="row">
     <div class="col-sm-12 col-md-12">
         <div class="panel panel-primary panel-hovered panel-stacked mb30">
-            <div class="panel-heading">{Lang::T('Edit Router')}</div>
+            <div class="panel-heading">{Lang::T('Edit Router')}
+                <div class="btn-group pull-right">
+                    <a class="btn btn-success btn-xs" href="{Text::url('routers/provision/', $d['id'])}" title="Run Provisioning Wizard">
+                        <i class="fa fa-magic"></i> Run Provisioning Wizard
+                    </a>
+                </div>
+            </div>
             <div class="panel-body">
                 <form class="form-horizontal" method="post" role="form" action="{Text::url('')}routers/edit-post">
                     <input type="hidden" name="id" value="{$d['id']}">
@@ -36,14 +42,15 @@
                         </div>
                     </div>
                     <div class="form-group">
-                        <label class="col-md-2 control-label">{Lang::T('Username')}</label>
+                        <label class="col-md-2 control-label">API Username</label>
                         <div class="col-md-6">
                             <input type="text" class="form-control" id="username" name="username"
                                 value="{$d['username']}">
+                            <p class="help-block">Production router communication should use <code>fastnet-api-usr</code>. Re-run the provisioning wizard to create or repair it.</p>
                         </div>
                     </div>
                     <div class="form-group">
-                        <label class="col-md-2 control-label">{Lang::T('Router Secret')}</label>
+                        <label class="col-md-2 control-label">API Password</label>
                         <div class="col-md-6">
                             <input type="password" class="form-control" id="password" name="password"
                                 value="{$d['password']}" onmouseleave="this.type = 'password'"
@@ -79,6 +86,9 @@
                     <div class="form-group">
                         <div class="col-lg-offset-2 col-lg-10">
                             <button class="btn btn-primary" onclick="return ask(this, '{Lang::T("Continue the process of changing Routers?")}')" type="submit">{Lang::T('Save Changes')}</button>
+                            <a class="btn btn-success" href="{Text::url('routers/provision/', $d['id'])}">
+                                <i class="fa fa-magic"></i> Run Provisioning Wizard
+                            </a>
                             Or <a href="{Text::url('')}routers/list">{Lang::T('Cancel')}</a>
                         </div>
                     </div>

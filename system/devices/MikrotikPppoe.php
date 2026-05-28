@@ -153,12 +153,30 @@ class MikrotikPppoe
 			$rate = '';
 		}
         $pool = ORM::for_table("tbl_pool")->where("pool_name", $plan['pool'])->find_one();
+        $poolName = !empty($pool['pool_name']) ? $pool['pool_name'] : (!empty($plan['pool']) ? $plan['pool'] : 'fastnetpay-pppoe-pool');
+        $localAddress = !empty($pool['local_ip']) ? $pool['local_ip'] : '192.168.90.1';
+
+        $printRequest = new RouterOS\Request('/ppp/profile/print');
+        $printRequest->setQuery(RouterOS\Query::where('name', $plan['name_plan']));
+        $profileID = $client->sendSync($printRequest)->getProperty('.id');
+        if (!empty($profileID)) {
+            $setRequest = new RouterOS\Request('/ppp/profile/set');
+            $client->sendSync(
+                $setRequest
+                    ->setArgument('numbers', $profileID)
+                    ->setArgument('local-address', $localAddress)
+                    ->setArgument('remote-address', $poolName)
+                    ->setArgument('rate-limit', $rate)
+            );
+            return;
+        }
+
         $addRequest = new RouterOS\Request('/ppp/profile/add');
         $client->sendSync(
             $addRequest
                 ->setArgument('name', $plan['name_plan'])
-                ->setArgument('local-address', (!empty($pool['local_ip'])) ? $pool['local_ip']: $pool['pool_name'])
-                ->setArgument('remote-address', $pool['pool_name'])
+                ->setArgument('local-address', $localAddress)
+                ->setArgument('remote-address', $poolName)
                 ->setArgument('rate-limit', $rate)
         );
     }

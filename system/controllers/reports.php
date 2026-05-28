@@ -257,6 +257,7 @@ switch ($action) {
         echo json_encode($result);
         die();
     case 'by-date':
+    case 'transactions':
     case 'activation':
         $q = (_post('q') ? _post('q') : _get('q'));
         $keep = _post('keep');
@@ -275,6 +276,42 @@ switch ($action) {
         $ui->assign('activation', $d);
         $ui->assign('q', $q);
         $ui->display('admin/reports/activation.tpl');
+        break;
+
+    case 'mpesa-logs':
+        $sd = reports_mpesa_date(_req('sd', $before_30_days), $before_30_days);
+        $ed = reports_mpesa_date(_req('ed', $mdate), $mdate);
+        $status = _req('status', 'all');
+        $status = in_array($status, ['all', '1', '2', '3', '4'], true) ? $status : 'all';
+        $q = alphanumeric(_req('q'), '_ .@:/-');
+        $append_url = '&' . http_build_query([
+            'sd' => $sd,
+            'ed' => $ed,
+            'status' => $status,
+            'q' => $q,
+        ]);
+
+        $query = reports_mpesa_query($sd, $ed, $status, $q);
+        $payments = Paginator::findMany($query, [], 50, $append_url);
+        if (!$payments) {
+            $payments = [];
+        }
+
+        $logs = [];
+        foreach ($payments as $payment) {
+            $logs[] = reports_mpesa_row($payment);
+        }
+
+        $summary = reports_mpesa_summary($sd, $ed, $q);
+
+        $ui->assign('_title', 'M-Pesa Logs');
+        $ui->assign('logs', $logs);
+        $ui->assign('summary', $summary);
+        $ui->assign('sd', $sd);
+        $ui->assign('ed', $ed);
+        $ui->assign('status', $status);
+        $ui->assign('q', $q);
+        $ui->display('admin/reports/mpesa-logs.tpl');
         break;
 
     case 'by-period':
@@ -318,6 +355,8 @@ switch ($action) {
         $ui->display('admin/reports/period-view.tpl');
         break;
 
+    case 'clients':
+    case 'routers':
     case 'daily-report':
     default:
         $types = ORM::for_table('tbl_transactions')->getEnum('type');
@@ -393,4 +432,144 @@ switch ($action) {
         run_hook('view_daily_reports'); #HOOK
         $ui->display('admin/reports/list.tpl');
         break;
+}
+
+function reports_mpesa_date($value, $fallback)
+{
+    return preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) ? $value : $fallback;
+}
+
+function reports_mpesa_query($sd, $ed, $status = 'all', $q = '')
+{
+    $query = ORM::for_table('tbl_payment_gateway')
+        ->where('gateway', 'mpesastkpush')
+        ->where_gte('created_date', $sd . ' 00:00:00')
+        ->where_lte('created_date', $ed . ' 23:59:59')
+        ->order_by_desc('id');
+
+    if ($status !== 'all') {
+        $query->where('status', (int) $status);
+    }
+
+    if ($q !== '') {
+        $like = '%' . $q . '%';
+        $query->where_raw(
+            '(gateway_trx_id LIKE ? OR username LIKE ? OR routers LIKE ? OR plan_name LIKE ? OR trx_invoice LIKE ? OR payment_method LIKE ? OR payment_channel LIKE ? OR pg_request LIKE ? OR pg_paid_response LIKE ?)',
+            [$like, $like, $like, $like, $like, $like, $like, $like, $like]
+        );
+    }
+
+    return $query;
+}
+
+function reports_mpesa_summary($sd, $ed, $q = '')
+{
+    $base = reports_mpesa_query($sd, $ed, 'all', $q);
+    $total = $base->count();
+
+    $paidQuery = reports_mpesa_query($sd, $ed, '2', $q);
+    $paidTotal = $paidQuery->sum('price');
+
+    return [
+        'total' => (int) $total,
+        'paid' => (int) reports_mpesa_query($sd, $ed, '2', $q)->count(),
+        'pending' => (int) reports_mpesa_query($sd, $ed, '1', $q)->count(),
+        'failed' => (int) reports_mpesa_query($sd, $ed, '3', $q)->count(),
+        'canceled' => (int) reports_mpesa_query($sd, $ed, '4', $q)->count(),
+        'failed_total' => (int) reports_mpesa_query($sd, $ed, '3', $q)->count() + (int) reports_mpesa_query($sd, $ed, '4', $q)->count(),
+        'paid_total' => $paidTotal == '' ? 0 : (float) $paidTotal,
+    ];
+}
+
+function reports_mpesa_row($payment)
+{
+    $request = reports_mpesa_decode($payment['pg_request']);
+    $response = reports_mpesa_decode($payment['pg_paid_response']);
+    $phone = reports_mpesa_value($response, 'PhoneNumber', reports_mpesa_value($request, 'phone', reports_mpesa_value($request, 'default_phone', '')));
+    $amount = reports_mpesa_value($response, 'Amount', $payment['price']);
+    $receipt = reports_mpesa_value($response, 'MpesaReceiptNumber', '');
+    $resultCode = reports_mpesa_value($response, 'ResultCode', '');
+    $resultDesc = reports_mpesa_value($response, 'ResultDesc', reports_mpesa_value($request, 'status_note', ''));
+    $merchantRequestId = reports_mpesa_value($response, 'MerchantRequestID', reports_mpesa_value($request, 'merchant_request_id', ''));
+    $checkoutRequestId = reports_mpesa_value($response, 'CheckoutRequestID', reports_mpesa_value($request, 'checkout_request_id', $payment['gateway_trx_id']));
+    $transactionDate = reports_mpesa_transaction_date(reports_mpesa_value($response, 'TransactionDate', ''));
+
+    return [
+        'id' => $payment['id'],
+        'username' => $payment['username'],
+        'plan_name' => $payment['plan_name'],
+        'routers' => $payment['routers'],
+        'price' => $payment['price'],
+        'amount' => $amount,
+        'phone' => $phone,
+        'receipt' => $receipt,
+        'result_code' => $resultCode,
+        'result_desc' => $resultDesc,
+        'merchant_request_id' => $merchantRequestId,
+        'checkout_request_id' => $checkoutRequestId,
+        'created_date' => $payment['created_date'],
+        'paid_date' => $payment['paid_date'],
+        'transaction_date' => $transactionDate,
+        'invoice' => $payment['trx_invoice'],
+        'payment_link' => $payment['pg_url_payment'],
+        'status' => (int) $payment['status'],
+        'status_label' => reports_mpesa_status_label((int) $payment['status']),
+        'status_class' => reports_mpesa_status_class((int) $payment['status']),
+    ];
+}
+
+function reports_mpesa_decode($value)
+{
+    if ($value == '') {
+        return [];
+    }
+
+    $decoded = json_decode($value, true);
+    return is_array($decoded) ? $decoded : [];
+}
+
+function reports_mpesa_value($array, $key, $fallback = '')
+{
+    return isset($array[$key]) && $array[$key] !== '' ? $array[$key] : $fallback;
+}
+
+function reports_mpesa_transaction_date($value)
+{
+    if (preg_match('/^\d{14}$/', $value)) {
+        return substr($value, 0, 4) . '-' . substr($value, 4, 2) . '-' . substr($value, 6, 2) . ' ' . substr($value, 8, 2) . ':' . substr($value, 10, 2) . ':' . substr($value, 12, 2);
+    }
+
+    return '';
+}
+
+function reports_mpesa_status_label($status)
+{
+    switch ((int) $status) {
+        case 1:
+            return 'Pending';
+        case 2:
+            return 'Paid';
+        case 3:
+            return 'Failed';
+        case 4:
+            return 'Canceled';
+        default:
+            return 'Unknown';
+    }
+}
+
+function reports_mpesa_status_class($status)
+{
+    switch ((int) $status) {
+        case 1:
+            return 'warning';
+        case 2:
+            return 'success';
+        case 3:
+            return 'danger';
+        case 4:
+            return 'default';
+        default:
+            return 'default';
+    }
 }

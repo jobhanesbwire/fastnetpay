@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="{$app_url}/ui/ui/fonts/font-awesome/css/font-awesome.min.css">
     <link rel="stylesheet" href="{$app_url}/ui/ui/styles/modern-AdminLTE.min.css">
     <link rel="stylesheet" href="{$app_url}/ui/ui/styles/sweetalert2.min.css" />
-    <link rel="stylesheet" href="{$app_url}/ui/ui/styles/fastnetpay-theme.css?2026.5.21" />
+    <link rel="stylesheet" href="{$app_url}/ui/ui/styles/fastnetpay-theme.css?2026.5.22" />
     <script src="{$app_url}/ui/ui/scripts/sweetalert2.all.min.js"></script>
 
 

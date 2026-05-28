@@ -28,6 +28,120 @@ switch ($action) {
         $ui->display('admin/routers/add.tpl');
         break;
 
+    case 'provision':
+        RouterProvisioning::installSchema();
+        $id = (int) ($routes['2'] ?? 0);
+        if ($id <= 0 && $_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['draft'] ?? '') !== '1') {
+            $firstRouter = ORM::for_table('tbl_routers')->where('enabled', 1)->order_by_asc('id')->find_one();
+            if (!$firstRouter) {
+                $firstRouter = ORM::for_table('tbl_routers')->order_by_asc('id')->find_one();
+            }
+            if ($firstRouter) {
+                r2(getUrl('routers/provision/' . $firstRouter['id']));
+            }
+        }
+        $router = RouterProvisioning::router($id);
+        $settings = RouterProvisioning::settingsFromRequest($router);
+        $ui->assign('_title', 'Router Provisioning Wizard');
+        $ui->assign('router', $router);
+        $ui->assign('router_id', $router ? (int) $router['id'] : 0);
+        $ui->assign('routers', ORM::for_table('tbl_routers')->order_by_asc('name')->find_many());
+        $ui->assign('templates', RouterProvisioning::templates());
+        $ui->assign('plans', RouterProvisioning::plans());
+        $ui->assign('settings', $settings);
+        $mpesa = RouterProvisioning::mpesaReadiness();
+        $ui->assign('mpesa', $mpesa);
+        $ui->assign('mpesa_missing', implode(', ', $mpesa['missing']));
+        $ui->assign('csrf_token', Csrf::generateAndStoreToken());
+        $ui->assign('xfooter', '<script src="' . APP_URL . '/ui/ui/scripts/fastnetpay-provisioning.js?2026.5.23"></script>');
+        $ui->display('admin/routers/provision.tpl');
+        break;
+
+    case 'provision-detect':
+        $id = (int) ($routes['2'] ?? 0);
+        if (!Csrf::check(_post('csrf_token'))) {
+            RouterProvisioning::json(['ok' => false, 'message' => 'Invalid CSRF token. Please refresh and try again.'], 403);
+        }
+        try {
+            $router = RouterProvisioning::router($id);
+            $settings = RouterProvisioning::settingsFromRequest($router);
+            RouterProvisioning::json(RouterProvisioning::detect($router, $settings));
+        } catch (Throwable $e) {
+            RouterProvisioning::json(['ok' => false, 'message' => $e->getMessage()], 400);
+        }
+        break;
+
+    case 'provision-preview':
+        $id = (int) ($routes['2'] ?? 0);
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            r2(getUrl('routers/provision/' . $id));
+        }
+        if (!Csrf::check(_post('csrf_token'))) {
+            RouterProvisioning::json(['ok' => false, 'message' => 'Invalid CSRF token. Please refresh and try again.'], 403);
+        }
+        try {
+            $router = RouterProvisioning::router($id);
+            $settings = RouterProvisioning::settingsFromRequest($router);
+            $preview = RouterProvisioning::buildProvisioningScript($router, $settings, RouterProvisioning::plans(), RouterProvisioning::mpesaReadiness());
+            RouterProvisioning::json(['ok' => true] + $preview);
+        } catch (Throwable $e) {
+            RouterProvisioning::json(['ok' => false, 'message' => $e->getMessage()], 400);
+        }
+        break;
+
+    case 'provision-run':
+        $id = (int) ($routes['2'] ?? 0);
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            r2(getUrl('routers/provision/' . $id));
+        }
+        if (!Csrf::check(_post('csrf_token'))) {
+            RouterProvisioning::json(['ok' => false, 'message' => 'Invalid CSRF token. Please refresh and try again.'], 403);
+        }
+        try {
+            $router = RouterProvisioning::router($id);
+            $settings = RouterProvisioning::settingsFromRequest($router);
+            RouterProvisioning::json(RouterProvisioning::runProvisioning($router, $settings, $admin));
+        } catch (Throwable $e) {
+            RouterProvisioning::json(['ok' => false, 'message' => $e->getMessage()], 500);
+        }
+        break;
+
+    case 'provision-final-test':
+        $id = (int) ($routes['2'] ?? 0);
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            r2(getUrl('routers/provision/' . $id));
+        }
+        if (!Csrf::check(_post('csrf_token'))) {
+            RouterProvisioning::json(['ok' => false, 'message' => 'Invalid CSRF token. Please refresh and try again.'], 403);
+        }
+        try {
+            $router = RouterProvisioning::router($id);
+            $settings = RouterProvisioning::settingsFromRequest($router);
+            RouterProvisioning::json(RouterProvisioning::finalTest($router, $settings));
+        } catch (Throwable $e) {
+            RouterProvisioning::json(['ok' => false, 'message' => $e->getMessage()], 500);
+        }
+        break;
+
+    case 'provision-logs':
+        RouterProvisioning::installSchema();
+        $id = (int) ($routes['2'] ?? 0);
+        $router = RouterProvisioning::router($id);
+        $runs = RouterProvisioning::runs($id);
+        $runs_with_steps = [];
+        foreach ($runs as $run) {
+            $runs_with_steps[] = [
+                'run' => $run,
+                'steps' => RouterProvisioning::steps($run['id']),
+            ];
+        }
+        $ui->assign('_title', 'Router Provisioning Logs');
+        $ui->assign('router', $router);
+        $ui->assign('router_id', $id);
+        $ui->assign('runs_with_steps', $runs_with_steps);
+        $ui->display('admin/routers/provision-logs.tpl');
+        break;
+
     case 'edit':
         $id  = $routes['2'];
         $d = ORM::for_table('tbl_routers')->find_one($id);

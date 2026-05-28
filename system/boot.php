@@ -147,7 +147,7 @@ try {
     );
     $ui->assign("error_summary", Lang::T('The request could not be completed. Please reload the page or return to the dashboard.'));
     $ui->assign("error_debug", $e->getMessage() . "\n\n" . $e->getTraceAsString());
-    $ui->assign("error_title", "PHPNuxBill Crash");
+    $ui->assign("error_title", "FASTNETPAY System Notice");
     if (empty($_SESSION['aid'])) {
         $ui->display('customer/error.tpl');
         die();
@@ -162,7 +162,7 @@ try {
     );
     $ui->assign("error_summary", Lang::T('The request could not be completed. Please reload the page or return to the dashboard.'));
     $ui->assign("error_debug", $e->getMessage() . "\n\n" . $e->getTraceAsString());
-    $ui->assign("error_title", "PHPNuxBill Crash");
+    $ui->assign("error_title", "FASTNETPAY System Notice");
     if (empty($_SESSION['aid'])) {
         $ui->display('customer/error.tpl');
         die();

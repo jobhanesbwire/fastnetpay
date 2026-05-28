@@ -40,6 +40,9 @@ class Package
         }
 
         $p = ORM::for_table('tbl_plans')->where('id', $plan_id)->find_one();
+        if ($p && !in_array($router_name, ['balance', 'Custom Balance'], true) && trim((string) $router_name) !== '') {
+            $p->set('routers', $router_name);
+        }
 
         if (!$isVoucher) {
             $c = ORM::for_table('tbl_customers')->where('id', $id_customer)->find_one();

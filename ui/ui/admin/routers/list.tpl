@@ -6,6 +6,8 @@
         <div class="panel panel-hovered mb20 panel-primary">
             <div class="panel-heading">{Lang::T('Routers')}
                 <div class="btn-group pull-right">
+                    <a class="btn btn-success btn-xs" title="Provision Router Automatically" href="{Text::url('routers/provision')}">
+                        <span class="fa fa-magic"></span></a>
                     <a class="btn btn-primary btn-xs" title="save" href="{Text::url('')}routers/maps">
                         <span class="glyphicon glyphicon-map-marker"></span></a>
                 </div>
@@ -31,6 +33,8 @@
                         <a href="{Text::url('')}routers/add" class="btn btn-primary btn-block"><i
                                 class="ion ion-android-add">
                             </i> {Lang::T('New Router')}</a>
+                        <a href="{Text::url('routers/provision')}" class="btn btn-success btn-block" style="margin-top:8px"><i
+                                class="fa fa-magic"></i> Provision Router Automatically</a>
                     </div>&nbsp;
                 </div>
                 <div class="table-responsive">
@@ -85,6 +89,10 @@
                                     <td>
                                         <a href="{Text::url('')}routers/edit/{$ds['id']}"
                                             class="btn btn-info btn-xs">{Lang::T('Edit')}</a>
+                                        <a href="{Text::url('routers/provision/', $ds['id'])}"
+                                            class="btn btn-success btn-xs" title="Run Provisioning Wizard" data-toggle="tooltip">
+                                            <i class="fa fa-magic"></i>
+                                        </a>
                                         <a href="{Text::url('')}routers/delete/{$ds['id']}" id="{$ds['id']}"
                                             onclick="return ask(this, '{Lang::T('Delete')}?')"
                                             class="btn btn-danger btn-xs"><i class="glyphicon glyphicon-trash"></i></a>

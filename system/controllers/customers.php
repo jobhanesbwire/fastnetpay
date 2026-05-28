@@ -6,7 +6,7 @@
  **/
 
 _admin();
-$ui->assign('_title', Lang::T('Customer'));
+$ui->assign('_title', 'Clients');
 $ui->assign('_system_menu', 'customers');
 
 $action = $routes['1'];
@@ -289,10 +289,11 @@ switch ($action) {
                     if ($_app_stage != 'demo') {
                         if (file_exists($dvc)) {
                             require_once $dvc;
-                            if (method_exists($dvc, 'sync_customer')) {
-                                (new $p['device'])->sync_customer($c, $p);
+                            $device = new $p['device'];
+                            if (method_exists($device, 'sync_customer')) {
+                                $device->sync_customer($c, $p);
                             }else{
-                                (new $p['device'])->add_customer($c, $p);
+                                $device->add_customer($c, $p);
                             }
                         } else {
                             new Exception(Lang::T("Devices Not Found"));
@@ -826,29 +827,35 @@ switch ($action) {
         }
         break;
 
+    case 'hotspot':
+    case 'pppoe':
     default:
         run_hook('list_customers'); #HOOK
         $search = _req('search');
         $order = _req('order', 'username');
         $filter = _req('filter', 'Active');
         $orderby = _req('orderby', 'asc');
+        $client_page = in_array($action, ['hotspot', 'pppoe'], true) ? $action : 'all';
+        $client_route = $client_page == 'pppoe' ? 'customers/pppoe' : ($client_page == 'hotspot' ? 'customers/hotspot' : 'customers');
+        $service_type = $client_page == 'pppoe' ? 'PPPoE' : ($client_page == 'hotspot' ? 'Hotspot' : '');
+        $order = customers_safe_order($order);
+        $orderby = strtolower($orderby) == 'desc' ? 'desc' : 'asc';
         $order_pos = [
-            'username' => 0,
-            'created_at' => 8,
-            'balance' => 3,
-            'status' => 7
+            'username' => 1,
+            'fullname' => 3,
+            'lastname' => 3,
+            'created_at' => 10,
+            'balance' => 4,
+            'status' => 9,
+            'service_type' => 7
         ];
 
         $append_url = "&order=" . urlencode($order) . "&filter=" . urlencode($filter) . "&orderby=" . urlencode($orderby);
-
-        if ($search != '') {
-            $query = ORM::for_table('tbl_customers')
-                ->whereRaw("username LIKE '%$search%' OR fullname LIKE '%$search%' OR address LIKE '%$search%' " .
-                    "OR phonenumber LIKE '%$search%' OR email LIKE '%$search%' AND status='$filter'");
-        } else {
-            $query = ORM::for_table('tbl_customers');
-            $query->where("status", $filter);
+        if ($client_page == 'pppoe') {
+            $append_url .= "&client_page=pppoe";
         }
+
+        $query = customers_query($search, $filter, $service_type);
         if ($order == 'lastname') {
             $query->order_by_expr("SUBSTR(fullname, INSTR(fullname, ' ')) $orderby");
         } else {
@@ -906,13 +913,80 @@ switch ($action) {
         }
         $d = Paginator::findMany($query, ['search' => $search], 30, $append_url);
         $ui->assign('d', $d);
+        $ui->assign('client_summary', customers_summary());
+        $ui->assign('pppoe_summary', customers_pppoe_summary());
+        $ui->assign('client_page', $client_page);
+        $ui->assign('client_route', $client_route);
         $ui->assign('statuses', ORM::for_table('tbl_customers')->getEnum("status"));
         $ui->assign('filter', $filter);
         $ui->assign('search', $search);
         $ui->assign('order', $order);
-        $ui->assign('order_pos', $order_pos[$order]);
+        $ui->assign('order_pos', $order_pos[$order] ?? 1);
         $ui->assign('orderby', $orderby);
         $ui->assign('csrf_token',  Csrf::generateAndStoreToken());
         $ui->display('admin/customers/list.tpl');
         break;
+}
+
+function customers_safe_order($order)
+{
+    $allowed = ['username', 'fullname', 'lastname', 'created_at', 'balance', 'status', 'service_type'];
+    return in_array($order, $allowed, true) ? $order : 'username';
+}
+
+function customers_query($search, $filter = 'Active', $service_type = '')
+{
+    $query = ORM::for_table('tbl_customers');
+
+    if ($filter != '' && $filter != 'all') {
+        $query->where('status', $filter);
+    }
+
+    if ($service_type != '') {
+        $query->where('service_type', $service_type);
+    }
+
+    if ($search != '') {
+        $like = '%' . $search . '%';
+        $query->where_raw(
+            '(username LIKE ? OR fullname LIKE ? OR address LIKE ? OR phonenumber LIKE ? OR email LIKE ? OR pppoe_username LIKE ? OR pppoe_ip LIKE ?)',
+            [$like, $like, $like, $like, $like, $like, $like]
+        );
+    }
+
+    return $query;
+}
+
+function customers_summary()
+{
+    return [
+        'hotspot' => (int) ORM::for_table('tbl_customers')->where('service_type', 'Hotspot')->count(),
+        'pppoe' => (int) ORM::for_table('tbl_customers')->where('service_type', 'PPPoE')->count(),
+        'total' => (int) ORM::for_table('tbl_customers')->count(),
+    ];
+}
+
+function customers_count_recharge($where)
+{
+    $query = ORM::for_table('tbl_user_recharges')->where_in('type', ['PPPOE', 'PPPoE']);
+    foreach ($where as $column => $value) {
+        if ($column == 'not_expired') {
+            $query->where_gte('expiration', date('Y-m-d'));
+        } elseif ($column == 'expired') {
+            $query->where_lt('expiration', date('Y-m-d'));
+        } else {
+            $query->where($column, $value);
+        }
+    }
+    return (int) $query->count();
+}
+
+function customers_pppoe_summary()
+{
+    return [
+        'total' => (int) ORM::for_table('tbl_customers')->where('service_type', 'PPPoE')->count(),
+        'not_expired' => customers_count_recharge(['status' => 'on', 'not_expired' => true]),
+        'expired' => customers_count_recharge(['expired' => true]),
+        'inactive' => (int) ORM::for_table('tbl_customers')->where('service_type', 'PPPoE')->where_not_equal('status', 'Active')->count(),
+    ];
 }
