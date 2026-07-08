@@ -12,6 +12,68 @@ $action = $routes['1'];
 $ui->assign('_admin', $admin);
 
 switch ($action) {
+    case 'tenant':
+        if (!class_exists('Tenant') || !Tenant::isTenantRequest()) {
+            r2(getUrl('settings/app'));
+        }
+        if (!in_array($admin['user_type'], ['SuperAdmin', 'Admin', 'Agent'])) {
+            _alert(Lang::T('You do not have permission to access this page'), 'danger', "dashboard");
+        }
+        $tenant = Tenant::current();
+        $safeSettings = [
+            'support_whatsapp' => Tenant::setting('portal', 'support_whatsapp', '', Tenant::currentId()),
+            'portal_welcome' => Tenant::setting('portal', 'welcome_message', '', Tenant::currentId()),
+            'portal_terms' => Tenant::setting('portal', 'terms_text', '', Tenant::currentId()),
+            'footer_text' => Tenant::setting('portal', 'footer_text', '', Tenant::currentId()),
+            'invoice_footer' => Tenant::setting('billing', 'invoice_footer', '', Tenant::currentId()),
+            'notification_preferences' => Tenant::setting('notification', 'preferences', '', Tenant::currentId()),
+            'payment_enabled' => Tenant::setting('payment', 'enabled', 'yes', Tenant::currentId()),
+            'payment_label' => Tenant::setting('payment', 'public_label', 'M-Pesa STK Push', Tenant::currentId()),
+            'payment_support_message' => Tenant::setting('payment', 'support_message', '', Tenant::currentId()),
+        ];
+        $ui->assign('_title', 'Tenant Settings');
+        $ui->assign('tenant', $tenant);
+        $ui->assign('tenant_settings', $safeSettings);
+        $ui->assign('csrf_token', Csrf::generateAndStoreToken());
+        $ui->display('admin/settings/tenant.tpl');
+        break;
+
+    case 'tenant-post':
+        if (!class_exists('Tenant') || !Tenant::isTenantRequest()) {
+            r2(getUrl('settings/app'), 'e', Lang::T('This page is available only on a tenant portal.'));
+        }
+        if (!in_array($admin['user_type'], ['SuperAdmin', 'Admin', 'Agent'])) {
+            _alert(Lang::T('You do not have permission to access this page'), 'danger', "dashboard");
+        }
+        if (!Csrf::check(_post('csrf_token'))) {
+            r2(getUrl('settings/tenant'), 'e', Lang::T('Invalid or Expired CSRF Token') . ".");
+        }
+        try {
+            $tenant = Tenant::current();
+            $tenant->name = substr(trim((string) _post('business_name', $tenant['name'])), 0, 160);
+            $tenant->logo = substr(trim((string) _post('logo', $tenant['logo'])), 0, 255);
+            $tenant->primary_color = preg_match('/^#[0-9a-fA-F]{6}$/', _post('primary_color')) ? _post('primary_color') : $tenant['primary_color'];
+            $tenant->secondary_color = preg_match('/^#[0-9a-fA-F]{6}$/', _post('secondary_color')) ? _post('secondary_color') : $tenant['secondary_color'];
+            $tenant->contact_phone = substr(trim((string) _post('support_phone')), 0, 64);
+            $tenant->contact_email = substr(trim((string) _post('support_email')), 0, 160);
+            $tenant->timezone = substr(trim((string) _post('timezone', $tenant['timezone'])), 0, 80);
+            $tenant->currency = strtoupper(substr(trim((string) _post('currency', $tenant['currency'])), 0, 16));
+            $tenant->updated_at = date('Y-m-d H:i:s');
+            $tenant->save();
+
+            Tenant::saveSetting('portal', 'support_whatsapp', trim(strip_tags((string) _post('support_whatsapp'))), false, Tenant::currentId());
+            Tenant::saveSetting('portal', 'welcome_message', trim(strip_tags((string) _post('portal_welcome'))), false, Tenant::currentId());
+            Tenant::saveSetting('portal', 'terms_text', trim(strip_tags((string) _post('portal_terms'))), false, Tenant::currentId());
+            Tenant::saveSetting('portal', 'footer_text', trim(strip_tags((string) _post('footer_text'))), false, Tenant::currentId());
+            Tenant::saveSetting('billing', 'invoice_footer', trim(strip_tags((string) _post('invoice_footer'))), false, Tenant::currentId());
+            Tenant::saveSetting('notification', 'preferences', trim(strip_tags((string) _post('notification_preferences'))), false, Tenant::currentId());
+            Tenant::audit('tenant.settings_changed', 'Tenant-safe settings updated.', 'tenant', (string) Tenant::currentId(), Tenant::currentId(), (int) $admin['id']);
+            r2(getUrl('settings/tenant'), 's', Lang::T('Settings Saved Successfully'));
+        } catch (Throwable $e) {
+            r2(getUrl('settings/tenant'), 'e', $e->getMessage());
+        }
+        break;
+
     case 'docs':
         $d = ORM::for_table('tbl_appconfig')->where('setting', 'docs_clicked')->find_one();
         if ($d) {
@@ -480,6 +542,9 @@ switch ($action) {
                 $query = ORM::for_table('tbl_users')
                     ->where_like('username', '%' . $search . '%')
                     ->order_by_asc('id');
+                if (class_exists('Tenant') && Tenant::isTenantRequest()) {
+                    Tenant::scopeQuery($query);
+                }
                 $d = Paginator::findMany($query, ['search' => $search]);
             } else if ($admin['user_type'] == 'Admin') {
                 $query = ORM::for_table('tbl_users')
@@ -489,6 +554,9 @@ switch ($action) {
                             ['user_type' => 'Sales'],
                             ['id' => $admin['id']]
                         ])->order_by_asc('id');
+                if (class_exists('Tenant')) {
+                    Tenant::scopeQuery($query);
+                }
                 $d = Paginator::findMany($query, ['search' => $search]);
             } else {
                 $query = ORM::for_table('tbl_users')
@@ -502,6 +570,9 @@ switch ($action) {
         } else {
             if ($admin['user_type'] == 'SuperAdmin') {
                 $query = ORM::for_table('tbl_users')->order_by_asc('id');
+                if (class_exists('Tenant') && Tenant::isTenantRequest()) {
+                    Tenant::scopeQuery($query);
+                }
                 $d = Paginator::findMany($query);
             } else if ($admin['user_type'] == 'Admin') {
                 $query = ORM::for_table('tbl_users')->where_any_is([
@@ -510,6 +581,9 @@ switch ($action) {
                     ['user_type' => 'Sales'],
                     ['id' => $admin['id']]
                 ])->order_by_asc('id');
+                if (class_exists('Tenant')) {
+                    Tenant::scopeQuery($query);
+                }
                 $d = Paginator::findMany($query);
             } else {
                 $query = ORM::for_table('tbl_users')
@@ -704,6 +778,9 @@ switch ($action) {
         if ($msg == '') {
             $passwordC = Password::_crypt($password);
             $d = ORM::for_table('tbl_users')->create();
+            if (class_exists('Tenant')) {
+                Tenant::stamp($d, (int) (($admin['tenant_id'] ?? 0) ?: Tenant::currentId()), 'tbl_users');
+            }
             $d->username = $username;
             $d->fullname = $fullname;
             $d->password = $passwordC;

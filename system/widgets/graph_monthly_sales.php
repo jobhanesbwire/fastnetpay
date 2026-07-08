@@ -7,7 +7,8 @@ class graph_monthly_sales
         global $CACHE_PATH, $ui;
 
 
-        $cacheMSfile = $CACHE_PATH . File::pathFixer('/monthlySales.temp');
+        $tenantCacheKey = class_exists('Tenant') ? ('tenant_' . Tenant::currentId()) : 'global';
+        $cacheMSfile = $CACHE_PATH . File::pathFixer('/monthlySales_' . $tenantCacheKey . '.temp');
         //Cache for 12 hours
         if (file_exists($cacheMSfile) && time() - filemtime($cacheMSfile) < 43200) {
             $monthlySales = json_decode(file_get_contents($cacheMSfile), true);
@@ -19,8 +20,8 @@ class graph_monthly_sales
                 ->where_raw("YEAR(recharged_on) = YEAR(CURRENT_DATE())") // Filter by the current year
                 ->where_not_equal('method', 'Customer - Balance')
                 ->where_not_equal('method', 'Recharge Balance - Administrator')
-                ->group_by_expr('MONTH(recharged_on)')
-                ->find_many();
+                ->group_by_expr('MONTH(recharged_on)');
+            $results = Tenant::scopeIfTenant($results)->find_many();
 
             // Create an array to hold the monthly sales data
             $monthlySales = array();

@@ -4,8 +4,8 @@ $query = isset($_GET['query']) ? trim($_GET['query']) : '';
 
 if (!empty($query)) {
     $results = ORM::for_table('tbl_customers')
-        ->where_like('username', "%$query%")
-        ->find_many();
+        ->where_like('username', "%$query%");
+    $results = Tenant::scopeIfTenant($results)->find_many();
 
     if ($results) {
         echo '<ul>';

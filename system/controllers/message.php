@@ -16,6 +16,16 @@ if (empty($action)) {
     $action = 'send';
 }
 
+function fnp_message_customer($id)
+{
+    return Tenant::scopeIfTenant(ORM::for_table('tbl_customers'))->find_one((int) $id);
+}
+
+function fnp_message_router($id)
+{
+    return Tenant::scopeIfTenant(ORM::for_table('tbl_routers'))->find_one((int) $id);
+}
+
 switch ($action) {
     case 'send':
         if (!in_array($admin['user_type'], ['SuperAdmin', 'Admin', 'Agent', 'Sales'])) {
@@ -43,7 +53,7 @@ document.addEventListener("DOMContentLoaded", function(event) {
 </script>
 EOT;
         if (isset($routes['2']) && !empty($routes['2'])) {
-            $ui->assign('cust', ORM::for_table('tbl_customers')->find_one($routes['2']));
+            $ui->assign('cust', fnp_message_customer($routes['2']));
         }
         $id = $routes['2'];
         $ui->assign('id', $id);
@@ -67,7 +77,10 @@ EOT;
             r2(getUrl('message/send'), 'e', Lang::T('All field is required'));
         } else {
             // Get customer details from the database
-            $c = ORM::for_table('tbl_customers')->find_one($id_customer);
+            $c = fnp_message_customer($id_customer);
+            if (!$c) {
+                r2(getUrl('message/send'), 'e', Lang::T('Customer not found'));
+            }
 
             // Replace placeholders in the message with actual values
             $message = str_replace('[[name]]', $c['fullname'], $message);
@@ -78,10 +91,11 @@ EOT;
                 // token only valid for 1 day, for security reason
                 $token = User::generateToken($c['id'], 1);
                 if (!empty($token['token'])) {
-                    $tur = ORM::for_table('tbl_user_recharges')
+                    $turQuery = ORM::for_table('tbl_user_recharges')
                         ->where('customer_id', $c['id'])
                         //->where('namebp', $package)
-                        ->find_one();
+                        ;
+                    $tur = Tenant::scopeIfTenant($turQuery)->find_one();
                     if ($tur) {
                         $url = '?_route=home&recharge=' . $tur['id'] . '&uid=' . urlencode($token['token']);
                         $message = str_replace('[[payment_link]]', $url, $message);
@@ -114,7 +128,8 @@ EOT;
             _alert(Lang::T('You do not have permission to access this page'), 'danger', "dashboard");
         }
 
-        $ui->assign('routers', ORM::forTable('tbl_routers')->where('enabled', '1')->find_many());
+        $routerQuery = ORM::for_table('tbl_routers')->where('enabled', '1');
+        $ui->assign('routers', Tenant::scopeIfTenant($routerQuery)->find_many());
         $ui->display('admin/message/bulk.tpl');
         break;
 
@@ -151,7 +166,7 @@ EOT;
                     $routerName = 'Radius';
                     break;
                 default:
-                    $router = ORM::for_table('tbl_routers')->find_one($router);
+                    $router = fnp_message_router($router);
                     if (!$router) {
                         die(json_encode(['status' => 'error', 'message' => 'Invalid router']));
                     }
@@ -164,6 +179,7 @@ EOT;
             $query = ORM::for_table('tbl_user_recharges')
                 ->left_outer_join('tbl_customers', 'tbl_user_recharges.customer_id = tbl_customers.id')
                 ->where('tbl_user_recharges.routers', $routerName);
+            $query = Tenant::scopeIfTenant($query, 'tbl_user_recharges');
 
             switch ($service) {
                 case 'all':
@@ -200,12 +216,13 @@ EOT;
                 ['tbl_customers.phonenumber', 'phonenumber'],
                 ['tbl_user_recharges.customer_id', 'customer_id'],
                 ['tbl_customers.fullname', 'fullname'],
+                ['tbl_customers.username', 'username'],
             ]);
             $customers = $query->find_array();
         } else {
             switch ($group) {
                 case 'all':
-                    $totalCustomersQuery = ORM::for_table('tbl_customers');
+                    $totalCustomersQuery = Tenant::scopeIfTenant(ORM::for_table('tbl_customers'));
 
                     switch ($service) {
                         case 'all':
@@ -224,6 +241,7 @@ EOT;
                 case 'new':
                     $totalCustomersQuery = ORM::for_table('tbl_customers')
                         ->where_raw("DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH)");
+                    $totalCustomersQuery = Tenant::scopeIfTenant($totalCustomersQuery);
 
                     switch ($service) {
                         case 'all':
@@ -241,7 +259,9 @@ EOT;
 
                 case 'expired':
                     $totalCustomersQuery = ORM::for_table('tbl_user_recharges')
-                        ->where('status', 'off');
+                        ->left_outer_join('tbl_customers', 'tbl_user_recharges.customer_id = tbl_customers.id')
+                        ->where('tbl_user_recharges.status', 'off');
+                    $totalCustomersQuery = Tenant::scopeIfTenant($totalCustomersQuery, 'tbl_user_recharges');
 
                     switch ($service) {
                         case 'all':
@@ -249,17 +269,24 @@ EOT;
                         default:
                             $validServices = ['PPPoE', 'Hotspot', 'VPN'];
                             if (in_array($service, $validServices)) {
-                                $totalCustomersQuery->where('type', $service);
+                                $totalCustomersQuery->where('tbl_user_recharges.type', $service);
                             }
                             break;
                     }
                     $totalCustomers = $totalCustomersQuery->count();
-                    $customers = $totalCustomersQuery->select('customer_id')->offset($startpoint)->limit($batch)->find_array();
+                    $customers = $totalCustomersQuery->selects([
+                        ['tbl_customers.phonenumber', 'phonenumber'],
+                        ['tbl_user_recharges.customer_id', 'customer_id'],
+                        ['tbl_customers.fullname', 'fullname'],
+                        ['tbl_customers.username', 'username'],
+                    ])->offset($startpoint)->limit($batch)->find_array();
                     break;
 
                 case 'active':
                     $totalCustomersQuery = ORM::for_table('tbl_user_recharges')
-                        ->where('status', 'on');
+                        ->left_outer_join('tbl_customers', 'tbl_user_recharges.customer_id = tbl_customers.id')
+                        ->where('tbl_user_recharges.status', 'on');
+                    $totalCustomersQuery = Tenant::scopeIfTenant($totalCustomersQuery, 'tbl_user_recharges');
 
                     switch ($service) {
                         case 'all':
@@ -267,12 +294,17 @@ EOT;
                         default:
                             $validServices = ['PPPoE', 'Hotspot', 'VPN'];
                             if (in_array($service, $validServices)) {
-                                $totalCustomersQuery->where('type', $service);
+                                $totalCustomersQuery->where('tbl_user_recharges.type', $service);
                             }
                             break;
                     }
                     $totalCustomers = $totalCustomersQuery->count();
-                    $customers = $totalCustomersQuery->select('customer_id')->offset($startpoint)->limit($batch)->find_array(); // Get customer data
+                    $customers = $totalCustomersQuery->selects([
+                        ['tbl_customers.phonenumber', 'phonenumber'],
+                        ['tbl_user_recharges.customer_id', 'customer_id'],
+                        ['tbl_customers.fullname', 'fullname'],
+                        ['tbl_customers.username', 'username'],
+                    ])->offset($startpoint)->limit($batch)->find_array(); // Get customer data
                     break;
             }
         }
@@ -378,7 +410,7 @@ EOT;
             $form = 'Admin';
 
             foreach ($customerIds as $customerId) {
-                $customer = ORM::for_table('tbl_customers')->where('id', $customerId)->find_one();
+                $customer = fnp_message_customer($customerId);
                 if ($customer) {
                     $messageSent = false;
 

@@ -28,12 +28,13 @@ class customer_expired
         ->innerJoin('tbl_customers', ['tur.customer_id', '=', 'c.id'], 'c')
         ->where_lte('expiration', $current_date)
         ->order_by_desc('expiration');
+        $query = Tenant::scopeIfTenant($query, 'tur');
         $expire = Paginator::findMany($query);
 
         // Get the total count of expired records for pagination
         $totalCount = ORM::for_table('tbl_user_recharges')
-        ->where_lte('expiration', $current_date)
-        ->count();
+        ->where_lte('expiration', $current_date);
+        $totalCount = Tenant::scopeIfTenant($totalCount)->count();
 
         // Pass the total count and current page to the paginator
         $paginator['total_count'] = $totalCount;

@@ -86,7 +86,14 @@ class Message
             return null;
         }
         if (!isset($client_m)) {
-            $mikrotik = ORM::for_table('tbl_routers')->where('name', $router_name)->find_one();
+            $routerQuery = ORM::for_table('tbl_routers')->where('name', $router_name);
+            if (class_exists('Tenant')) {
+                $routerQuery = Tenant::scopeIfTenant($routerQuery);
+            }
+            $mikrotik = $routerQuery->find_one();
+            if (!$mikrotik) {
+                throw new Exception('Router not found for SMS gateway.');
+            }
             $iport = explode(":", $mikrotik['ip_address']);
             $client_m = new RouterOS\Client($iport[0], $mikrotik['username'], $mikrotik['password'], ($iport[1]) ? $iport[1] : null);
         }
@@ -259,8 +266,11 @@ class Message
             if (!empty($token['token'])) {
                 $tur = ORM::for_table('tbl_user_recharges')
                     ->where('customer_id', $customer['id'])
-                    ->where('namebp', $package)
-                    ->find_one();
+                    ->where('namebp', $package);
+                if (class_exists('Tenant')) {
+                    $tur = Tenant::scopeIfTenant($tur);
+                }
+                $tur = $tur->find_one();
                 if ($tur) {
                     $url = '?_route=home&recharge=' . $tur['id'] . '&uid=' . urlencode($token['token']);
                     $msg = str_replace('[[payment_link]]', $url, $msg);
@@ -421,6 +431,9 @@ class Message
     public static function logMessage($messageType, $recipient, $messageContent, $status, $errorMessage = null)
     {
         $log = ORM::for_table('tbl_message_logs')->create();
+        if (class_exists('Tenant')) {
+            Tenant::stamp($log, null, 'tbl_message_logs');
+        }
         $log->message_type = $messageType;
         $log->recipient = $recipient;
         $log->message_content = $messageContent;

@@ -20,20 +20,24 @@ switch ($action) {
     case 'pool':
         $routers = _get('routers');
         if (empty($routers)) {
-            $d = ORM::for_table('tbl_pool')->find_many();
+            $query = Tenant::scopeIfTenant(ORM::for_table('tbl_pool'));
+            $d = $query->find_many();
         } else {
-            $d = ORM::for_table('tbl_pool')->where('routers', $routers)->find_many();
+            $query = ORM::for_table('tbl_pool')->where('routers', $routers);
+            $query = Tenant::scopeIfTenant($query);
+            $d = $query->find_many();
         }
         $ui->assign('routers', $routers);
         $ui->assign('d', $d);
         $ui->display('admin/autoload/pool.tpl');
         break;
     case 'bw_name':
-        $bw = ORM::for_table('tbl_bandwidth')->select("name_bw")->find_one($routes['2']);
+        $bw = Tenant::scopeIfTenant(ORM::for_table('tbl_bandwidth')->select("name_bw"))->find_one($routes['2']);
         echo $bw['name_bw'];
         die();
     case 'balance':
-        $balance = ORM::for_table('tbl_customers')->select("balance")->find_one($routes['2'])['balance'];
+        $customer = Tenant::scopeIfTenant(ORM::for_table('tbl_customers')->select("balance"))->find_one($routes['2']);
+        $balance = $customer ? $customer['balance'] : 0;
         if ($routes['3'] == '1') {
             echo Lang::moneyFormat($balance);
         } else {
@@ -41,7 +45,9 @@ switch ($action) {
         }
         die();
     case 'server':
-        $d = ORM::for_table('tbl_routers')->where('enabled', '1')->find_many();
+        $query = ORM::for_table('tbl_routers')->where('enabled', '1');
+        $query = Tenant::scopeIfTenant($query);
+        $d = $query->find_many();
         $ui->assign('d', $d);
 
         $ui->display('admin/autoload/server.tpl');
@@ -51,8 +57,8 @@ switch ($action) {
             $cs = ORM::for_table('tbl_customers')
                 ->select("username")
                 ->where_not_equal('id', _get('id'))
-                ->where("pppoe_ip", _get('ip'))
-                ->findArray();
+                ->where("pppoe_ip", _get('ip'));
+            $cs = Tenant::scopeIfTenant($cs)->findArray();
             if (count($cs) > 0) {
                 $c = array_column($cs, 'username');
                 die(Lang::T("IP has been used by") . ' : ' . implode(", ", $c));
@@ -64,8 +70,8 @@ switch ($action) {
             $cs = ORM::for_table('tbl_customers')
                 ->select("username")
                 ->where_not_equal('id', _get('id'))
-                ->where("pppoe_username", _get('u'))
-                ->findArray();
+                ->where("pppoe_username", _get('u'));
+            $cs = Tenant::scopeIfTenant($cs)->findArray();
             if (count($cs) > 0) {
                 $c = array_column($cs, 'username');
                 die(Lang::T("Username has been used by") . ' : ' . implode(", ", $c));
@@ -78,23 +84,27 @@ switch ($action) {
         if (in_array($admin['user_type'], array('SuperAdmin', 'Admin'))) {
             switch ($server) {
                 case 'radius':
-                    $d = ORM::for_table('tbl_plans')->where('is_radius', 1)->where('type', $jenis)->find_many();
+                    $query = ORM::for_table('tbl_plans')->where('is_radius', 1)->where('type', $jenis);
+                    $d = Tenant::scopeIfTenant($query)->find_many();
                     break;
                 case '':
                     break;
                 default:
-                    $d = ORM::for_table('tbl_plans')->where('routers', $server)->where('type', $jenis)->find_many();
+                    $query = ORM::for_table('tbl_plans')->where('routers', $server)->where('type', $jenis);
+                    $d = Tenant::scopeIfTenant($query)->find_many();
                     break;
             }
         } else {
             switch ($server) {
                 case 'radius':
-                    $d = ORM::for_table('tbl_plans')->where('is_radius', 1)->where('type', $jenis)->find_many();
+                    $query = ORM::for_table('tbl_plans')->where('is_radius', 1)->where('type', $jenis);
+                    $d = Tenant::scopeIfTenant($query)->find_many();
                     break;
                 case '':
                     break;
                 default:
-                    $d = ORM::for_table('tbl_plans')->where('routers', $server)->where('type', $jenis)->find_many();
+                    $query = ORM::for_table('tbl_plans')->where('routers', $server)->where('type', $jenis);
+                    $d = Tenant::scopeIfTenant($query)->find_many();
                     break;
             }
         }
@@ -104,8 +114,9 @@ switch ($action) {
         break;
     case 'customer_is_active':
         if ($config['check_customer_online'] == 'yes') {
-            $c = ORM::for_table('tbl_customers')->where('username', $routes['2'])->find_one();
-            $p = ORM::for_table('tbl_plans')->find_one($routes['3']);
+            $customerQuery = ORM::for_table('tbl_customers')->where('username', $routes['2']);
+            $c = Tenant::scopeIfTenant($customerQuery)->find_one();
+            $p = Tenant::scopeIfTenant(ORM::for_table('tbl_plans'))->find_one($routes['3']);
             $dvc = Package::getDevice($p);
             if ($_app_stage != 'Demo') {
                 if (file_exists($dvc)) {
@@ -126,14 +137,16 @@ switch ($action) {
         }
         break;
     case 'plan_is_active':
-        $ds = ORM::for_table('tbl_user_recharges')->where('customer_id', $routes['2'])->find_array();
+        $billQuery = ORM::for_table('tbl_user_recharges')->where('customer_id', $routes['2']);
+        $billQuery = Tenant::scopeIfTenant($billQuery);
+        $ds = $billQuery->find_array();
         if ($ds) {
             $ps = [];
-            $c = ORM::for_table('tbl_customers')->find_one($routes['2']);
+            $c = Tenant::scopeIfTenant(ORM::for_table('tbl_customers'))->find_one($routes['2']);
             foreach ($ds as $d) {
                 if ($d['status'] == 'on') {
                     if ($config['check_customer_online'] == 'yes') {
-                        $p = ORM::for_table('tbl_plans')->find_one($d['plan_id']);
+                        $p = Tenant::scopeIfTenant(ORM::for_table('tbl_plans'))->find_one($d['plan_id']);
                         $dvc = Package::getDevice($p);
                         $status = "";
                         if ($_app_stage != 'Demo') {
@@ -167,9 +180,12 @@ switch ($action) {
 
         $s = addslashes(_get('s'));
         if (empty($s)) {
-            $c = ORM::for_table('tbl_customers')->limit(30)->find_many();
+            $query = Tenant::scopeIfTenant(ORM::for_table('tbl_customers')->limit(30));
+            $c = $query->find_many();
         } else {
-            $c = ORM::for_table('tbl_customers')->where_raw("(`username` LIKE '%$s%' OR `fullname` LIKE '%$s%' OR `phonenumber` LIKE '%$s%' OR `email` LIKE '%$s%')")->limit(30)->find_many();
+            $query = ORM::for_table('tbl_customers')->where_raw("(`username` LIKE '%$s%' OR `fullname` LIKE '%$s%' OR `phonenumber` LIKE '%$s%' OR `email` LIKE '%$s%')")->limit(30);
+            $query = Tenant::scopeIfTenant($query);
+            $c = $query->find_many();
         }
         header('Content-Type: application/json');
         foreach ($c as $cust) {

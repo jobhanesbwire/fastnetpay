@@ -37,9 +37,64 @@
                 <span>{Lang::T('Refresh')}</span>
             </a>
         </div>
-    </section>
+        </section>
 
-    {assign rows explode(".", $_c[$dtipe])}
+        {if isset($expiry_health) && !$expiry_health.ok}
+            <div class="fnp-dashboard-expiry-alert">
+                <i class="fa fa-exclamation-triangle"></i>
+                <div>
+                    <strong>Cron/Expiry Worker not running</strong>
+                    <span>{$expiry_health.message|escape} Last success: {if $expiry_health.last_success}{$expiry_health.last_success|escape}{else}never{/if}.</span>
+                </div>
+                <a href="{Text::url('expiry/status')}" class="btn btn-warning btn-sm">Check Worker</a>
+            </div>
+        {/if}
+
+        {if isset($saas_analytics)}
+            <section class="fnp-saas-dashboard-strip">
+                <div class="fnp-saas-strip-head">
+                    <div>
+                        <span class="fnp-dashboard-kicker"><i class="fa fa-sitemap"></i> SaaS Control</span>
+                        <h2>Tenant Billing & Operations</h2>
+                    </div>
+                    <a href="{Text::url('saas/billing')}" class="btn btn-success btn-sm"><i class="fa fa-credit-card"></i> Manage Billing</a>
+                </div>
+                <div class="row">
+                    <div class="col-md-3 col-sm-6">
+                        <div class="fnp-saas-card fnp-saas-kpi">
+                            <span>Tenants</span>
+                            <b>{$saas_analytics.tenants.total}</b>
+                            <small>{$saas_analytics.tenants.active} active · {$saas_analytics.tenants.suspended} suspended</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                        <div class="fnp-saas-card fnp-saas-kpi">
+                            <span>Router Health</span>
+                            <b>{$saas_analytics.routers.online}/{$saas_analytics.routers.total}</b>
+                            <small>{$saas_analytics.routers.offline} offline router(s)</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                        <div class="fnp-saas-card fnp-saas-kpi">
+                            <span>Active ISP Users</span>
+                            <b>{$saas_analytics.clients.total}</b>
+                            <small>{$saas_analytics.clients.hotspot} hotspot · {$saas_analytics.clients.pppoe} PPPoE</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                        <div class="fnp-saas-card fnp-saas-kpi">
+                            <span>Expected SaaS Revenue</span>
+                            <b>Ksh {$saas_analytics.financial.expected|string_format:"%.2f"}</b>
+                            <small>Ksh {$saas_analytics.financial.overdue|string_format:"%.2f"} overdue</small>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        {elseif isset($saas_analytics_error)}
+            <div class="alert alert-warning">SaaS analytics could not load: {$saas_analytics_error|escape}</div>
+        {/if}
+
+        {assign rows explode(".", $_c[$dtipe])}
     {assign pos 1}
     {foreach $rows as $cols}
         {if $cols == 12}
@@ -63,7 +118,7 @@
     {/foreach}
 </div>
 
-{if $_c['new_version_notify'] != 'disable'}
+{if $_c['new_version_notify'] != 'disable' && !($_tenant_mode eq 'tenant' && $_admin['user_type'] neq 'SuperAdmin')}
     <script>
         window.addEventListener('DOMContentLoaded', function() {
             $.getJSON("./version.json?" + Math.random(), function(data) {

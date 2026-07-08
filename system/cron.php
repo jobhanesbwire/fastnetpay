@@ -66,12 +66,16 @@ foreach ($d as $ds) {
             }
 
             // Fetch plan details
-            $p = ORM::for_table('tbl_plans')->where('id', $u['plan_id'])->find_one();
-            if (!$p) {
-                throw new Exception("Plan not found for ID: " . $u['plan_id']);
-            }
+	            $p = ORM::for_table('tbl_plans')->where('id', $u['plan_id'])->find_one();
+	            if (!$p) {
+	                throw new Exception("Plan not found for ID: " . $u['plan_id']);
+	            }
+	            $p->routers = $ds['routers'] ?: $p['routers'];
+	            if (!empty($ds['namebp'])) {
+	                $p->name_plan = $ds['namebp'];
+	            }
 
-            $dvc = Package::getDevice($p);
+	            $dvc = Package::getDevice($p);
             if ($_app_stage != 'demo') {
                 if (file_exists($dvc)) {
                     require_once $dvc;
@@ -149,7 +153,25 @@ if ($config['frrest_interim_update'] != 0) {
             $ra->acctstatustype = 'Stop';
             $ra->save();
         }
+	}
+}
+
+try {
+    $expiryResult = ExpiryWorker::run(false);
+    echo "FASTNETPAY expiry worker: " . $expiryResult['message'] . "\n";
+} catch (Throwable $e) {
+    _log('FASTNETPAY expiry worker error: ' . $e->getMessage());
+    echo "FASTNETPAY expiry worker error: " . $e->getMessage() . "\n";
+}
+
+try {
+    if (class_exists('SaasBilling')) {
+        $saasResult = SaasBilling::runCron();
+        echo "FASTNETPAY SaaS billing worker: generated " . $saasResult['generated'] . " invoice(s), suspended " . $saasResult['suspended'] . " tenant(s)\n";
     }
+} catch (Throwable $e) {
+    _log('FASTNETPAY SaaS billing worker error: ' . $e->getMessage());
+    echo "FASTNETPAY SaaS billing worker error: " . $e->getMessage() . "\n";
 }
 
 if ($config['router_check']) {

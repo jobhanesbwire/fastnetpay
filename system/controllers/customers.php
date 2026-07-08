@@ -39,8 +39,8 @@ switch ($action) {
             ->select('email')
             ->select('balance')
             ->select('service_type')
-            ->order_by_asc('tbl_customers.id')
-            ->find_array();
+            ->order_by_asc('tbl_customers.id');
+        $cs = Tenant::scopeIfTenant($cs, 'tbl_customers')->find_array();
 
         $h = false;
         set_time_limit(-1);
@@ -101,8 +101,8 @@ switch ($action) {
             ->select('status')
             ->select('method', 'Payment')
             ->left_outer_join('tbl_user_recharges', array('tbl_customers.id', '=', 'tbl_user_recharges.customer_id'))
-            ->order_by_asc('tbl_customers.id')
-            ->find_array();
+            ->order_by_asc('tbl_customers.id');
+        $cs = Tenant::scopeIfTenant($cs, 'tbl_customers')->find_array();
 
         $h = false;
         set_time_limit(-1);
@@ -170,12 +170,13 @@ switch ($action) {
         if (!Csrf::check($csrf_token)) {
             r2(getUrl('customers/view/') . $id_customer, 'e', Lang::T('Invalid or Expired CSRF Token') . ".");
         }
-        $b = ORM::for_table('tbl_user_recharges')->where('customer_id', $id_customer)->where('plan_id', $plan_id)->find_one();
+        $bQuery = ORM::for_table('tbl_user_recharges')->where('customer_id', $id_customer)->where('plan_id', $plan_id);
+        $b = Tenant::scopeIfTenant($bQuery)->find_one();
         if ($b) {
             $gateway = 'Recharge';
             $channel = $admin['fullname'];
-            $cust = User::_info($id_customer);
-            $plan = ORM::for_table('tbl_plans')->find_one($b['plan_id']);
+            $cust = Tenant::scopeIfTenant(ORM::for_table('tbl_customers'))->find_one($id_customer);
+            $plan = Tenant::scopeIfTenant(ORM::for_table('tbl_plans'))->find_one($b['plan_id']);
 			$add_inv = User::getAttribute("Invoice", $id_customer);
 			if (!empty($add_inv)) {
 				$plan['price'] = $add_inv;
@@ -245,12 +246,12 @@ switch ($action) {
         if (!Csrf::check($csrf_token)) {
             r2(getUrl('customers/view/') . $id_customer, 'e', Lang::T('Invalid or Expired CSRF Token') . ".");
         }
-        $b = ORM::for_table('tbl_user_recharges')->where('customer_id', $id_customer)->where('plan_id', $plan_id)->find_one();
+        $bQuery = ORM::for_table('tbl_user_recharges')->where('customer_id', $id_customer)->where('plan_id', $plan_id);
+        $b = Tenant::scopeIfTenant($bQuery)->find_one();
         if ($b) {
-            $p = ORM::for_table('tbl_plans')->where('id', $b['plan_id'])->find_one();
+            $p = Tenant::scopeIfTenant(ORM::for_table('tbl_plans'))->where('id', $b['plan_id'])->find_one();
             if ($p) {
-                $p = ORM::for_table('tbl_plans')->where('id', $b['plan_id'])->find_one();
-                $c = User::_info($id_customer);
+                $c = Tenant::scopeIfTenant(ORM::for_table('tbl_customers'))->find_one($id_customer);
                 $dvc = Package::getDevice($p);
                 if ($_app_stage != 'demo') {
                     if (file_exists($dvc)) {
@@ -277,12 +278,13 @@ switch ($action) {
         if (!Csrf::check($csrf_token)) {
             r2(getUrl('customers/view/') . $id_customer, 'e', Lang::T('Invalid or Expired CSRF Token') . ".");
         }
-        $bs = ORM::for_table('tbl_user_recharges')->where('customer_id', $id_customer)->where('status', 'on')->findMany();
+        $bsQuery = ORM::for_table('tbl_user_recharges')->where('customer_id', $id_customer)->where('status', 'on');
+        $bs = Tenant::scopeIfTenant($bsQuery)->findMany();
         if ($bs) {
             $routers = [];
             foreach ($bs as $b) {
-                $c = ORM::for_table('tbl_customers')->find_one($id_customer);
-                $p = ORM::for_table('tbl_plans')->where('id', $b['plan_id'])->find_one();
+                $c = Tenant::scopeIfTenant(ORM::for_table('tbl_customers'))->find_one($id_customer);
+                $p = Tenant::scopeIfTenant(ORM::for_table('tbl_plans'))->where('id', $b['plan_id'])->find_one();
                 if ($p) {
                     $routers[] = $b['routers'];
                     $dvc = Package::getDevice($p);
@@ -314,7 +316,7 @@ switch ($action) {
         if (!Csrf::check($csrf_token)) {
             r2(getUrl('customers/view/') . $id, 'e', Lang::T('Invalid or Expired CSRF Token') . ".");
         }
-        $customer = ORM::for_table('tbl_customers')->find_one($id);
+        $customer = Tenant::scopeIfTenant(ORM::for_table('tbl_customers'))->find_one($id);
         if ($customer) {
             $_SESSION['uid'] = $id;
             User::setCookie($id);
@@ -323,18 +325,20 @@ switch ($action) {
         _alert(Lang::T('Customer not found'), 'danger', "customers");
         break;
     case 'viewu':
-        $customer = ORM::for_table('tbl_customers')->where('username', $routes['2'])->find_one();
+        $customerQuery = ORM::for_table('tbl_customers')->where('username', $routes['2']);
+        $customerQuery = Tenant::scopeIfTenant($customerQuery);
+        $customer = $customerQuery->find_one();
     case 'view':
         $id = $routes['2'];
         run_hook('view_customer'); #HOOK
         if (!$customer) {
-            $customer = ORM::for_table('tbl_customers')->find_one($id);
+            $customer = Tenant::scopeIfTenant(ORM::for_table('tbl_customers'))->find_one($id);
         }
         if ($customer) {
             // Fetch the Customers Attributes values from the tbl_customer_custom_fields table
             $customFields = ORM::for_table('tbl_customers_fields')
-                ->where('customer_id', $customer['id'])
-                ->find_many();
+                ->where('customer_id', $customer['id']);
+            $customFields = Tenant::scopeIfTenant($customFields)->find_many();
             $v = $routes['3'];
             if (empty($v)) {
                 $v = 'activation';
@@ -343,10 +347,12 @@ switch ($action) {
                 case 'order':
                     $v = 'order';
                     $query = ORM::for_table('tbl_payment_gateway')->where('user_id', $customer['id'])->order_by_desc('id');
+                    $query = Tenant::scopeIfTenant($query);
                     $order = Paginator::findMany($query);
 
                     if (empty($order) || $order < 5) {
                         $query = ORM::for_table('tbl_payment_gateway')->where('username', $customer['username'])->order_by_desc('id');
+                        $query = Tenant::scopeIfTenant($query);
                         $order = Paginator::findMany($query);
                     }
 
@@ -354,10 +360,12 @@ switch ($action) {
                     break;
                 case 'activation':
                     $query = ORM::for_table('tbl_transactions')->where('user_id', $customer['id'])->order_by_desc('id');
+                    $query = Tenant::scopeIfTenant($query);
                     $activation = Paginator::findMany($query);
 
                     if (empty($activation) || $activation < 5) {
                         $query = ORM::for_table('tbl_transactions')->where('username', $customer['username'])->order_by_desc('id');
+                        $query = Tenant::scopeIfTenant($query);
                         $activation = Paginator::findMany($query);
                     }
 
@@ -381,11 +389,11 @@ switch ($action) {
         }
         $id = $routes['2'];
         run_hook('edit_customer'); #HOOK
-        $d = ORM::for_table('tbl_customers')->find_one($id);
+        $d = Tenant::scopeIfTenant(ORM::for_table('tbl_customers'))->find_one($id);
         // Fetch the Customers Attributes values from the tbl_customers_fields table
         $customFields = ORM::for_table('tbl_customers_fields')
-            ->where('customer_id', $id)
-            ->find_many();
+            ->where('customer_id', $id);
+        $customFields = Tenant::scopeIfTenant($customFields)->find_many();
         if ($d) {
             if (isset($routes['3']) && $routes['3'] == 'deletePhoto') {
                 if ($d['photo'] != '' && strpos($d['photo'], 'default') === false) {
@@ -425,14 +433,16 @@ switch ($action) {
             r2(getUrl('customers/view/') . $id, 'e', Lang::T('Invalid or Expired CSRF Token') . ".");
         }
         run_hook('delete_customer'); #HOOK
-        $c = ORM::for_table('tbl_customers')->find_one($id);
+        $c = Tenant::scopeIfTenant(ORM::for_table('tbl_customers'))->find_one($id);
         if ($c) {
             // Delete the associated Customers Attributes records from tbl_customer_custom_fields table
-            ORM::for_table('tbl_customers_fields')->where('customer_id', $id)->delete_many();
+            Tenant::scopeIfTenant(ORM::for_table('tbl_customers_fields')->where('customer_id', $id))->delete_many();
             //Delete active package
-            $turs = ORM::for_table('tbl_user_recharges')->where('username', $c['username'])->find_many();
+            $tursQuery = ORM::for_table('tbl_user_recharges')->where('username', $c['username']);
+            $tursQuery = Tenant::scopeIfTenant($tursQuery);
+            $turs = $tursQuery->find_many();
             foreach ($turs as $tur) {
-                $p = ORM::for_table('tbl_plans')->find_one($tur['plan_id']);
+                $p = Tenant::scopeIfTenant(ORM::for_table('tbl_plans'))->find_one($tur['plan_id']);
                 if ($p) {
                     $dvc = Package::getDevice($p);
                     if ($_app_stage != 'demo') {
@@ -497,12 +507,15 @@ switch ($action) {
             $msg .= 'Password should be between 3 to 35 characters' . '<br>';
         }
 
-        $d = ORM::for_table('tbl_customers')->where('username', $username)->find_one();
+        $duplicateQuery = ORM::for_table('tbl_customers')->where('username', $username);
+        $duplicateQuery = Tenant::scopeIfTenant($duplicateQuery);
+        $d = $duplicateQuery->find_one();
         if ($d) {
             $msg .= Lang::T('Account already axist') . '<br>';
         }
         if ($msg == '') {
             $d = ORM::for_table('tbl_customers')->create();
+            Tenant::stamp($d, null, 'tbl_customers');
             $d->username = $username;
             $d->password = $password;
             $d->pppoe_username = $pppoe_username;
@@ -533,6 +546,7 @@ switch ($action) {
 
                     if (!empty($name)) {
                         $customField = ORM::for_table('tbl_customers_fields')->create();
+                        Tenant::stamp($customField, Tenant::rowTenantId($d), 'tbl_customers_fields');
                         $customField->customer_id = $customerId;
                         $customField->field_name = $name;
                         $customField->field_value = $value;
@@ -620,7 +634,7 @@ switch ($action) {
             $msg .= 'Full Name should be between 2 to 25 characters' . '<br>';
         }
 
-        $c = ORM::for_table('tbl_customers')->find_one($id);
+        $c = Tenant::scopeIfTenant(ORM::for_table('tbl_customers'))->find_one($id);
 
         if (!$c) {
             $msg .= Lang::T('Data Not Found') . '<br>';
@@ -628,8 +642,8 @@ switch ($action) {
 
         //lets find user Customers Attributes using id
         $customFields = ORM::for_table('tbl_customers_fields')
-            ->where('customer_id', $id)
-            ->find_many();
+            ->where('customer_id', $id);
+        $customFields = Tenant::scopeIfTenant($customFields)->find_many();
 
         $oldusername = $c['username'];
         $oldPppoeUsername = $c['pppoe_username'];
@@ -641,10 +655,14 @@ switch ($action) {
         $passDiff = false;
         $pppoeIpDiff = false;
         if ($oldusername != $username) {
-            if (ORM::for_table('tbl_customers')->where('username', $username)->find_one()) {
+            $duplicateQuery = ORM::for_table('tbl_customers')->where('username', $username);
+            $duplicateQuery = Tenant::scopeIfTenant($duplicateQuery);
+            if ($duplicateQuery->find_one()) {
                 $msg .= Lang::T('Username already used by another customer') . '<br>';
             }
-            if (ORM::for_table('tbl_customers')->where('pppoe_username', $username)->find_one()) {
+            $duplicateQuery = ORM::for_table('tbl_customers')->where('pppoe_username', $username);
+            $duplicateQuery = Tenant::scopeIfTenant($duplicateQuery);
+            if ($duplicateQuery->find_one()) {
                 $msg .= Lang::T('Username already used by another pppoe username customer') . '<br>';
             }
             $userDiff = true;
@@ -766,6 +784,7 @@ switch ($action) {
 
                         // Insert the new Customers Attributes
                         $newCustomField = ORM::for_table('tbl_customers_fields')->create();
+                        Tenant::stamp($newCustomField, Tenant::rowTenantId($c), 'tbl_customers_fields');
                         $newCustomField->set('customer_id', $id);
                         $newCustomField->set('field_name', $fieldName);
                         $newCustomField->set('field_value', $fieldValue);
@@ -779,17 +798,19 @@ switch ($action) {
                 $fieldsToDelete = $_POST['delete_custom_fields'];
                 foreach ($fieldsToDelete as $fieldName) {
                     // Delete the Customers Attributes with the given field name
-                    ORM::for_table('tbl_customers_fields')
+                    Tenant::scopeIfTenant(ORM::for_table('tbl_customers_fields')
                         ->where('field_name', $fieldName)
-                        ->where('customer_id', $id)
+                        ->where('customer_id', $id))
                         ->delete_many();
                 }
             }
 
             if ($userDiff || $pppoeDiff || $pppoeIpDiff || $passDiff) {
-                $turs = ORM::for_table('tbl_user_recharges')->where('customer_id', $c['id'])->findMany();
+                $tursQuery = ORM::for_table('tbl_user_recharges')->where('customer_id', $c['id']);
+                $tursQuery = Tenant::scopeIfTenant($tursQuery);
+                $turs = $tursQuery->findMany();
                 foreach ($turs as $tur) {
-                    $p = ORM::for_table('tbl_plans')->find_one($tur['plan_id']);
+                    $p = Tenant::scopeIfTenant(ORM::for_table('tbl_plans'))->find_one($tur['plan_id']);
                     $dvc = Package::getDevice($p);
                     if ($_app_stage != 'demo') {
                         // if has active package
@@ -937,6 +958,7 @@ function customers_safe_order($order)
 function customers_query($search, $filter = 'Active', $service_type = '')
 {
     $query = ORM::for_table('tbl_customers');
+    $query = Tenant::scopeIfTenant($query);
 
     if ($filter != '' && $filter != 'all') {
         $query->where('status', $filter);
@@ -959,16 +981,20 @@ function customers_query($search, $filter = 'Active', $service_type = '')
 
 function customers_summary()
 {
+    $hotspot = Tenant::scopeIfTenant(ORM::for_table('tbl_customers')->where('service_type', 'Hotspot'));
+    $pppoe = Tenant::scopeIfTenant(ORM::for_table('tbl_customers')->where('service_type', 'PPPoE'));
+    $total = Tenant::scopeIfTenant(ORM::for_table('tbl_customers'));
     return [
-        'hotspot' => (int) ORM::for_table('tbl_customers')->where('service_type', 'Hotspot')->count(),
-        'pppoe' => (int) ORM::for_table('tbl_customers')->where('service_type', 'PPPoE')->count(),
-        'total' => (int) ORM::for_table('tbl_customers')->count(),
+        'hotspot' => (int) $hotspot->count(),
+        'pppoe' => (int) $pppoe->count(),
+        'total' => (int) $total->count(),
     ];
 }
 
 function customers_count_recharge($where)
 {
     $query = ORM::for_table('tbl_user_recharges')->where_in('type', ['PPPOE', 'PPPoE']);
+    $query = Tenant::scopeIfTenant($query);
     foreach ($where as $column => $value) {
         if ($column == 'not_expired') {
             $query->where_gte('expiration', date('Y-m-d'));
@@ -983,10 +1009,12 @@ function customers_count_recharge($where)
 
 function customers_pppoe_summary()
 {
+    $total = Tenant::scopeIfTenant(ORM::for_table('tbl_customers')->where('service_type', 'PPPoE'));
+    $inactive = Tenant::scopeIfTenant(ORM::for_table('tbl_customers')->where('service_type', 'PPPoE')->where_not_equal('status', 'Active'));
     return [
-        'total' => (int) ORM::for_table('tbl_customers')->where('service_type', 'PPPoE')->count(),
+        'total' => (int) $total->count(),
         'not_expired' => customers_count_recharge(['status' => 'on', 'not_expired' => true]),
         'expired' => customers_count_recharge(['expired' => true]),
-        'inactive' => (int) ORM::for_table('tbl_customers')->where('service_type', 'PPPoE')->where_not_equal('status', 'Active')->count(),
+        'inactive' => (int) $inactive->count(),
     ];
 }

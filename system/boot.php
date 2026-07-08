@@ -48,6 +48,9 @@ $ui->assign('_path', __DIR__);
 $ui->assign('_c', $config);
 $ui->assign('_app_stage', $_app_stage);
 $ui->assign('user_language', $_SESSION['user_language']);
+if (class_exists('Tenant')) {
+    Tenant::assignToSmarty($ui);
+}
 $ui->assign('UPLOAD_PATH', str_replace($root_path, '',  $UPLOAD_PATH));
 $ui->assign('CACHE_PATH', str_replace($root_path, '',  $CACHE_PATH));
 $ui->assign('PAGES_PATH', str_replace($root_path, '',  $PAGES_PATH));
@@ -90,6 +93,22 @@ try {
         $_COOKIE['uid'] = $_GET['uid'];
     }
     $admin = Admin::_info();
+    if (class_exists('Tenant')) {
+        $ui->assign('_tenant_admin_scope_warning', '');
+        if ($admin && Tenant::isTenantRequest() && $admin['user_type'] !== 'SuperAdmin' && (int) ($admin['tenant_id'] ?? 0) !== Tenant::currentId()) {
+            Tenant::audit('tenant.access_blocked', 'Admin session tenant did not match requested tenant host.', 'user', (string) $admin['id'], Tenant::currentId(), (int) $admin['id']);
+            Admin::removeCookie();
+            r2(getUrl('admin'), 'e', Lang::T('Please log in through your ISP tenant domain.'));
+        }
+        if ($admin && class_exists('SaasBilling') && Tenant::isTenantRequest() && $admin['user_type'] !== 'SuperAdmin' && !SaasBilling::tenantCanLogin(Tenant::current())) {
+            Tenant::audit('tenant.access_blocked_suspended', 'Active tenant admin session blocked because tenant is suspended.', 'user', (string) $admin['id'], Tenant::currentId(), (int) $admin['id']);
+            Admin::removeCookie();
+            r2(getUrl('admin'), 'e', SaasBilling::suspensionMessage(Tenant::currentId()));
+        }
+        if ($admin && Tenant::isTenantRequest() && $admin['user_type'] !== 'SuperAdmin') {
+            Tenant::denyTenantAccessToSuperAdminRoutes($handler, $routes);
+        }
+    }
     $sys_render = $root_path . File::pathFixer('system/controllers/' . $handler . '.php');
     if (file_exists($sys_render)) {
         $menus = array();
@@ -99,6 +118,12 @@ try {
         // "function" => $function
         $ui->assign('_system_menu', $routes[0]);
         foreach ($menu_registered as $menu) {
+            if (class_exists('Tenant') && Tenant::isTenantRequest() && $admin && $admin['user_type'] !== 'SuperAdmin') {
+                $tenantAllowedPluginMenus = ['mikrotik_monitor_ui', 'mikrotik_monitor_pppoe', 'mikrotik_monitor_hotspot', 'mikrotik_import_ui', 'mikrotik_import_start_ui'];
+                if (!in_array($menu['function'], $tenantAllowedPluginMenus, true)) {
+                    continue;
+                }
+            }
             if ($menu['admin'] && _admin(false)) {
                 if (count($menu['auth']) == 0 || in_array($admin['user_type'], $menu['auth'])) {
                     $menus[$menu['position']] .= '<li' . (($routes[1] == $menu['function']) ? ' class="active"' : '') . '><a href="' . getUrl('plugin/' . $menu['function']) . '">';

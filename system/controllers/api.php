@@ -8,11 +8,20 @@
  * /?_route=api/hotspot/pay
  * /?_route=api/hotspot/payment-status
  * /?_route=api/hotspot/voucher-login
+ * /?_route=api/hotspot/reconnect
  * /?_route=api/hotspot/portal-file
+ * /?_route=api/jovipay/callback
  */
 
 $scope = $routes['1'] ?? '';
 $action = $routes['2'] ?? '';
+
+if ($scope === 'jovipay') {
+    if ($action === 'callback') {
+        JoviPay::handleCallback();
+    }
+    fnp_hotspot_json(['ok' => false, 'message' => 'Jovi-Pay API endpoint not found.'], 404);
+}
 
 if ($scope !== 'hotspot') {
     fnp_hotspot_json(['ok' => false, 'message' => 'API scope not found.'], 404);
@@ -29,6 +38,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
 }
 
 RouterProvisioning::installSchema();
+JoviPay::installSchema();
 
 if ($action === 'portal-file') {
     $router = fnp_hotspot_authorize();
@@ -74,6 +84,11 @@ switch ($action) {
         fnp_hotspot_voucher_login($router);
         break;
 
+    case 'reconnect':
+        $router = fnp_hotspot_authorize();
+        fnp_hotspot_reconnect($router);
+        break;
+
     default:
         fnp_hotspot_json(['ok' => false, 'message' => 'API endpoint not found.'], 404);
 }
@@ -92,8 +107,14 @@ function fnp_hotspot_authorize()
     return $router;
 }
 
+function fnp_hotspot_tenant_id($router)
+{
+    return class_exists('Tenant') ? (int) ($router['tenant_id'] ?: Tenant::currentId()) : 0;
+}
+
 function fnp_hotspot_packages($router)
 {
+    $tenantId = fnp_hotspot_tenant_id($router);
     $query = ORM::for_table('tbl_plans')
         ->select('tbl_plans.id', 'id')
         ->select('tbl_plans.name_plan', 'name_plan')
@@ -118,6 +139,9 @@ function fnp_hotspot_packages($router)
 
     $routerName = (string) $router['name'];
     $query->where_raw('(routers = ? OR routers = ? OR routers IS NULL)', [$routerName, '']);
+    if (class_exists('Tenant') && $tenantId > 0 && Tenant::hasColumn('tbl_plans', 'tenant_id')) {
+        $query->where('tbl_plans.tenant_id', $tenantId);
+    }
 
     $plans = [];
     foreach ($query->find_array() as $plan) {
@@ -169,6 +193,7 @@ function fnp_hotspot_start_mpesa($router)
 {
     global $PAYMENTGATEWAY_PATH;
 
+    $tenantId = fnp_hotspot_tenant_id($router);
     $phone = trim(_post('phone'));
     $planId = (int) _post('plan_id');
     $mac = fnp_hotspot_clean(_post('mac'), 32);
@@ -176,6 +201,14 @@ function fnp_hotspot_start_mpesa($router)
 
     if (!RouterProvisioning::throttleHotspotAttempt('pay:' . $router['id'] . ':' . $ip . ':' . $mac, 6, 300)) {
         fnp_hotspot_json(['ok' => false, 'message' => 'Too many payment attempts. Please wait a few minutes and try again.'], 429);
+    }
+
+    if (class_exists('JoviPay') && JoviPay::isEnabled($tenantId)) {
+        try {
+            fnp_hotspot_json(JoviPay::startHotspotPayment($router, $planId, $phone, $mac, $ip));
+        } catch (Throwable $e) {
+            fnp_hotspot_json(['ok' => false, 'message' => $e->getMessage()], 422);
+        }
     }
 
     require_once $PAYMENTGATEWAY_PATH . DIRECTORY_SEPARATOR . 'mpesastkpush.php';
@@ -194,6 +227,9 @@ function fnp_hotspot_start_mpesa($router)
         ->where('enabled', '1')
         ->where('type', 'Hotspot')
         ->find_one();
+    if ($plan && class_exists('Tenant') && Tenant::hasColumn('tbl_plans', 'tenant_id') && (int) ($plan['tenant_id'] ?? 0) !== $tenantId) {
+        $plan = null;
+    }
     if (!$plan) {
         fnp_hotspot_json(['ok' => false, 'message' => 'Selected package is not available.'], 404);
     }
@@ -201,6 +237,9 @@ function fnp_hotspot_start_mpesa($router)
     $customer = fnp_hotspot_customer($router, $formattedPhone, $mac, $ip);
     $paymentToken = bin2hex(random_bytes(24));
     $payment = ORM::for_table('tbl_payment_gateway')->create();
+    if (class_exists('Tenant')) {
+        Tenant::stamp($payment, $tenantId, 'tbl_payment_gateway');
+    }
     $payment->username = $customer['username'];
     $payment->user_id = (int) $customer['id'];
     $payment->gateway = 'mpesastkpush';
@@ -285,8 +324,30 @@ function fnp_hotspot_payment_status()
     fnp_hotspot_json(['ok' => true, 'status' => 'pending', 'message' => 'Payment pending. Check your phone and enter your M-Pesa PIN.']);
 }
 
+function fnp_hotspot_reconnect($router)
+{
+    if (!class_exists('JoviPay')) {
+        fnp_hotspot_json(['ok' => false, 'message' => 'Jovi-Pay reconnect service is not available.'], 503);
+    }
+
+    $code = strtoupper(fnp_hotspot_clean(_post('transaction_code') ?: _post('mpesa_code') ?: _post('receipt'), 80));
+    $phone = trim(_post('phone'));
+    $mac = fnp_hotspot_clean(_post('mac'), 64);
+    $ip = fnp_hotspot_clean(_post('ip'), 64);
+    if (!RouterProvisioning::throttleHotspotAttempt('reconnect:' . $router['id'] . ':' . $ip . ':' . $mac . ':' . $code, 8, 300)) {
+        fnp_hotspot_json(['ok' => false, 'message' => 'Too many reconnect attempts. Please wait a few minutes and try again.'], 429);
+    }
+
+    try {
+        fnp_hotspot_json(JoviPay::reconnect($router, $code, $phone, $mac, $ip));
+    } catch (Throwable $e) {
+        fnp_hotspot_json(['ok' => false, 'message' => $e->getMessage()], 422);
+    }
+}
+
 function fnp_hotspot_voucher_login($router)
 {
+    $tenantId = fnp_hotspot_tenant_id($router);
     $voucher = alphanumeric(_post('voucher'), '-_.');
     if ($voucher === '') {
         fnp_hotspot_json(['ok' => false, 'message' => 'Enter a voucher code.'], 422);
@@ -295,7 +356,11 @@ function fnp_hotspot_voucher_login($router)
         fnp_hotspot_json(['ok' => false, 'message' => 'Too many voucher attempts. Please wait and try again.'], 429);
     }
 
-    $row = ORM::for_table('tbl_voucher')->whereRaw('BINARY code = ?', [$voucher])->where('status', 0)->find_one();
+    $query = ORM::for_table('tbl_voucher')->whereRaw('BINARY code = ?', [$voucher])->where('status', 0);
+    if (class_exists('Tenant') && Tenant::hasColumn('tbl_voucher', 'tenant_id')) {
+        $query->where('tenant_id', $tenantId);
+    }
+    $row = $query->find_one();
     if (!$row) {
         fnp_hotspot_json(['ok' => false, 'message' => 'Voucher is invalid or already used.'], 404);
     }
@@ -319,11 +384,19 @@ function fnp_hotspot_voucher_login($router)
 
 function fnp_hotspot_customer($router, $phone, $mac, $ip)
 {
+    $tenantId = fnp_hotspot_tenant_id($router);
     $seed = $router['id'] . '|' . $mac . '|' . $ip . '|' . $phone;
     $username = 'hs_' . substr(sha1($seed), 0, 16);
-    $customer = ORM::for_table('tbl_customers')->where('username', $username)->find_one();
+    $query = ORM::for_table('tbl_customers')->where('username', $username);
+    if (class_exists('Tenant') && Tenant::hasColumn('tbl_customers', 'tenant_id')) {
+        $query->where('tenant_id', $tenantId);
+    }
+    $customer = $query->find_one();
     if (!$customer) {
         $customer = ORM::for_table('tbl_customers')->create();
+        if (class_exists('Tenant')) {
+            Tenant::stamp($customer, $tenantId, 'tbl_customers');
+        }
         $customer->username = $username;
         $customer->password = substr(sha1($seed . microtime(true)), 0, 10);
         $customer->photo = '/user.default.jpg';

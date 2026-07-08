@@ -129,6 +129,19 @@ if(empty($config['dashboard_Customer'])){
     $config['dashboard_Customer'] = "6,6";
 }
 
+$envOverrides = [
+    'APP_ENV' => 'app_env',
+    'APP_BASE_DOMAIN' => 'saas_base_domain',
+    'APP_LOCAL_DOMAIN' => 'saas_local_domain',
+    'TENANT_LOCAL_TESTING' => 'tenant_local_testing',
+];
+foreach ($envOverrides as $envKey => $configKey) {
+    $envValue = getenv($envKey);
+    if ($envValue !== false && trim((string) $envValue) !== '') {
+        $config[$configKey] = trim((string) $envValue);
+    }
+}
+
 
 $_c =  $config;
 if (empty($http_proxy) && !empty($config['http_proxy'])) {
@@ -138,6 +151,18 @@ if (empty($http_proxy) && !empty($config['http_proxy'])) {
     }
 }
 date_default_timezone_set($config['timezone']);
+try {
+    Tenant::boot($config);
+    Tenant::applyConfigOverrides($config);
+    $_c = $config;
+    if (!empty($config['timezone'])) {
+        date_default_timezone_set($config['timezone']);
+    }
+} catch (Throwable $e) {
+    _log('FASTNETPAY SaaS tenancy boot skipped: ' . $e->getMessage(), 'SaaS', 0);
+} catch (Exception $e) {
+    _log('FASTNETPAY SaaS tenancy boot skipped: ' . $e->getMessage(), 'SaaS', 0);
+}
 
 if ((!empty($radius_user) && $config['radius_enable']) || _post('radius_enable')) {
     if (!empty($radius_password)) {
@@ -239,6 +264,9 @@ function _admin($login = true)
 function _log($description, $type = '', $userid = '0')
 {
     $d = ORM::for_table('tbl_logs')->create();
+    if (class_exists('Tenant') && Tenant::hasColumn('tbl_logs', 'tenant_id')) {
+        $d->tenant_id = Tenant::currentId();
+    }
     $d->date = date('Y-m-d H:i:s');
     $d->type = $type;
     $d->description = $description;

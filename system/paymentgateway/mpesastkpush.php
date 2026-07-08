@@ -1049,6 +1049,17 @@ function mpesastkpush_config($key, $default = '')
 {
     global $config;
 
+    if (class_exists('Tenant')) {
+        $tenantRow = ORM::for_table('tenant_settings')
+            ->where('tenant_id', Tenant::currentId())
+            ->where('namespace', 'mpesa_stk_push')
+            ->where('setting', $key)
+            ->find_one();
+        if ($tenantRow) {
+            return (string) $tenantRow['value'];
+        }
+    }
+
     if (isset($config[$key]) && $config[$key] !== '') {
         return $config[$key];
     }
@@ -1075,6 +1086,11 @@ function mpesastkpush_config($key, $default = '')
 
 function mpesastkpush_save_setting($setting, $value)
 {
+    if (class_exists('Tenant') && Tenant::isTenantRequest()) {
+        Tenant::saveSetting('mpesa_stk_push', $setting, (string) $value, false);
+        return;
+    }
+
     $row = ORM::for_table('tbl_appconfig')->where('setting', $setting)->find_one();
     if (!$row) {
         $row = ORM::for_table('tbl_appconfig')->create();
@@ -1088,6 +1104,10 @@ function mpesastkpush_save_sensitive_setting($setting, $value)
 {
     $value = trim((string) $value);
     if ($value === '') {
+        return;
+    }
+    if (class_exists('Tenant') && Tenant::isTenantRequest()) {
+        Tenant::saveSetting('mpesa_stk_push', $setting, $value, true);
         return;
     }
     mpesastkpush_save_setting($setting, $value);

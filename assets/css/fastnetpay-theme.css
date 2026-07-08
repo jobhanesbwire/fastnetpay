@@ -9,10 +9,13 @@
     --fnp-primary-deep: #256b2b;
     --fnp-secondary: #f9c02b;
     --fnp-secondary-soft: #fff3c4;
+    --fnp-bg: #f1f1f1;
     --fnp-bg-soft: #f1f1f1;
     --fnp-dark: #1f2933;
+    --fnp-text: #1f2933;
     --fnp-muted: #6b7280;
     --fnp-white: #ffffff;
+    --fnp-card-bg: #ffffff;
     --fnp-danger: #dc3545;
     --fnp-info: #0ea5e9;
     --fnp-border: #d8e0d2;
@@ -217,6 +220,26 @@ button:focus,
 .search:focus {
     background: var(--fnp-primary);
     color: var(--fnp-white);
+}
+
+.fnp-tenant-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin: 9px 8px 0 0;
+    padding: 7px 11px;
+    border: 1px solid rgba(65, 161, 70, 0.18);
+    border-radius: 999px;
+    background: rgba(65, 161, 70, 0.1);
+    color: var(--fnp-primary-dark);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.dark-mode .fnp-tenant-pill {
+    border-color: rgba(74, 222, 128, 0.24);
+    background: rgba(74, 222, 128, 0.12);
+    color: #bbf7d0;
 }
 
 .search-overlay {
@@ -1122,14 +1145,81 @@ textarea.form-control {
 
 /* Dark mode kept readable while preserving the existing toggle. */
 .dark-mode {
-    background: #111827 !important;
-    color: #e5e7eb !important;
+    --fnp-primary: #4ade80;
+    --fnp-primary-dark: #22c55e;
+    --fnp-primary-deep: #16a34a;
+    --fnp-secondary: #facc15;
+    --fnp-secondary-soft: rgba(250, 204, 21, 0.14);
+    --fnp-bg: #0f172a;
+    --fnp-bg-soft: #0f172a;
+    --fnp-card-bg: #172033;
+    --fnp-surface: #172033;
+    --fnp-surface-soft: #111827;
+    --fnp-dark: #f8fafc;
+    --fnp-text: #e5e7eb;
+    --fnp-muted: #aab4c3;
+    --fnp-border: #344052;
+    --fnp-border-strong: #475569;
+    --fnp-shadow: 0 16px 36px rgba(0, 0, 0, 0.32);
+    --fnp-focus: 0 0 0 3px rgba(250, 204, 21, 0.24);
+    background: var(--fnp-bg) !important;
+    color: var(--fnp-text) !important;
 }
 
 .dark-mode .content-wrapper,
 .dark-mode .right-side,
 .dark-mode .wrapper {
+    background: var(--fnp-bg) !important;
+}
+
+html.dark-mode,
+body.dark-mode {
+    background: var(--fnp-bg) !important;
+}
+
+.dark-mode .main-sidebar,
+.dark-mode.modern-skin-dark .main-sidebar,
+html.dark-mode .main-sidebar,
+body.dark-mode .main-sidebar {
+    background: #0b1220 !important;
+    border-right: 1px solid rgba(250, 204, 21, 0.14);
+}
+
+.dark-mode .main-sidebar .sidebar,
+.dark-mode .main-sidebar .sidebar-menu {
+    background: transparent !important;
+}
+
+.dark-mode .main-sidebar .sidebar-menu > li > a {
+    color: #dbeafe !important;
+    background: transparent !important;
+}
+
+.dark-mode .main-sidebar .sidebar-menu > li > a:hover,
+.dark-mode .main-sidebar .sidebar-menu > li.active > a,
+.dark-mode .main-sidebar .sidebar-menu > li.menu-open > a {
+    background: rgba(74, 222, 128, 0.15) !important;
+    color: #ffffff !important;
+    border-left-color: var(--fnp-secondary) !important;
+}
+
+.dark-mode .main-sidebar .treeview-menu {
     background: #111827 !important;
+}
+
+.dark-mode .main-sidebar .treeview-menu > li > a {
+    color: #cbd5e1 !important;
+}
+
+.dark-mode .main-sidebar .treeview-menu > li > a:hover,
+.dark-mode .main-sidebar .treeview-menu > li.active > a {
+    color: #ffffff !important;
+    background: rgba(250, 204, 21, 0.1) !important;
+}
+
+.dark-mode .main-sidebar .user-panel,
+.dark-mode .main-sidebar .sidebar-form {
+    border-color: rgba(148, 163, 184, 0.18) !important;
 }
 
 .dark-mode .content-header > h1,
@@ -1148,9 +1238,9 @@ textarea.form-control {
 .dark-mode .modal-content,
 .dark-mode .table-responsive,
 .dark-mode .search-container {
-    border-color: rgba(249, 192, 43, 0.22) !important;
-    background: #172033 !important;
-    color: #e5e7eb !important;
+    border-color: rgba(250, 204, 21, 0.22) !important;
+    background: var(--fnp-card-bg) !important;
+    color: var(--fnp-text) !important;
 }
 
 .dark-mode .box-header,
@@ -1170,33 +1260,75 @@ textarea.form-control {
 .dark-mode .small-box h3,
 .dark-mode .info-box-content,
 .dark-mode .modal-body {
-    color: #e5e7eb !important;
+    color: var(--fnp-text) !important;
 }
 
 .dark-mode .small-box p,
 .dark-mode .info-box-text,
 .dark-mode .help-block {
-    color: #aab4c3 !important;
+    color: var(--fnp-muted) !important;
 }
 
 .dark-mode .form-control,
 .dark-mode .select2-container--bootstrap .select2-selection,
 .dark-mode .searchTerm {
-    border-color: #344052 !important;
+    border-color: var(--fnp-border) !important;
     color: #f9fafb !important;
     background: #111827 !important;
 }
 
 .dark-mode.modern-skin-dark .main-header .navbar,
 .dark-mode .main-footer {
-    background: #172033 !important;
-    color: #e5e7eb !important;
-    border-color: rgba(249, 192, 43, 0.2) !important;
+    background: var(--fnp-card-bg) !important;
+    color: var(--fnp-text) !important;
+    border-color: rgba(250, 204, 21, 0.2) !important;
 }
 
 .dark-mode .navbar-custom-menu > .navbar-nav > li > a,
 .dark-mode .navbar-custom-menu .toggle-container {
     color: #f9fafb !important;
+}
+
+.dark-mode .table-striped > tbody > tr:nth-of-type(odd) {
+    background: rgba(255, 255, 255, 0.025) !important;
+}
+
+.dark-mode .table-hover > tbody > tr:hover,
+.dark-mode .table-striped > tbody > tr:hover {
+    background: rgba(74, 222, 128, 0.08) !important;
+}
+
+.dark-mode .dropdown-menu,
+.dark-mode .select2-dropdown,
+.dark-mode .swal2-popup {
+    background: var(--fnp-card-bg) !important;
+    border-color: var(--fnp-border) !important;
+    color: var(--fnp-text) !important;
+}
+
+.dark-mode .dropdown-menu > li > a,
+.dark-mode .select2-results__option {
+    color: var(--fnp-text) !important;
+}
+
+.dark-mode .dropdown-menu > li > a:hover,
+.dark-mode .select2-results__option--highlighted {
+    background: rgba(74, 222, 128, 0.14) !important;
+    color: #f8fafc !important;
+}
+
+.dark-mode .btn-primary,
+.dark-mode .btn-success {
+    background: var(--fnp-primary-deep) !important;
+    border-color: var(--fnp-primary-deep) !important;
+    color: #ffffff !important;
+}
+
+.dark-mode .btn-warning,
+.dark-mode .btn-default {
+    background: #facc15 !important;
+    border-color: #eab308 !important;
+    color: #1f2933 !important;
 }
 
 /* Responsive refinements */
@@ -4165,6 +4297,67 @@ body {
     font-weight: 800;
 }
 
+.fnp-provision-subtitle {
+    margin: 18px 0 10px;
+    color: var(--fnp-provision-text);
+    font-size: 14px;
+    font-weight: 900;
+}
+
+.fnp-dashboard-expiry-alert {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 0 14px;
+    padding: 12px 14px;
+    border: 1px solid rgba(249, 192, 43, 0.45);
+    border-radius: 14px;
+    background: #fff8dc;
+    box-shadow: 0 10px 26px rgba(31, 41, 51, 0.08);
+}
+
+.fnp-dashboard-expiry-alert > i {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    border-radius: 12px;
+    background: #f9c02b;
+    color: #1f2933;
+}
+
+.fnp-dashboard-expiry-alert div {
+    flex: 1;
+    min-width: 0;
+}
+
+.fnp-dashboard-expiry-alert strong,
+.fnp-dashboard-expiry-alert span {
+    display: block;
+}
+
+.fnp-dashboard-expiry-alert span {
+    color: #6b7280;
+    font-size: 12.5px;
+}
+
+.fnp-expiry-page {
+    --fnp-provision-green: #41a146;
+    --fnp-provision-gold: #f9c02b;
+    --fnp-provision-bg: #f1f1f1;
+    --fnp-provision-text: #1f2933;
+    --fnp-provision-muted: #667085;
+    --fnp-provision-border: rgba(31, 41, 51, 0.1);
+    display: grid;
+    gap: 14px;
+}
+
+.fnp-expiry-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+}
+
 .fnp-provision-final-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4409,4 +4602,227 @@ body {
     .fnp-provision-plan em {
         grid-column: 2;
     }
+}
+
+/* SaaS management */
+.fnp-saas-page .box {
+    border-radius: var(--fnp-radius);
+    border: 1px solid rgba(65, 161, 70, 0.14);
+    box-shadow: var(--fnp-shadow-sm);
+}
+
+.fnp-saas-card {
+    min-height: 238px;
+    margin-bottom: 20px;
+    padding: 18px;
+    border: 1px solid rgba(65, 161, 70, 0.14);
+    border-radius: var(--fnp-radius);
+    background: var(--fnp-card-bg);
+    box-shadow: var(--fnp-shadow-sm);
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+
+.fnp-saas-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(65, 161, 70, 0.32);
+    box-shadow: var(--fnp-shadow);
+}
+
+.fnp-saas-card-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.fnp-saas-card-head h4 {
+    margin: 0 0 5px;
+    color: var(--fnp-dark);
+    font-weight: 900;
+}
+
+.fnp-saas-card-head p {
+    margin: 0;
+    color: var(--fnp-muted);
+}
+
+.fnp-saas-logo {
+    display: inline-block;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    box-shadow: inset 0 0 0 4px rgba(255, 255, 255, .32);
+}
+
+.fnp-saas-stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 16px 0;
+}
+
+.fnp-saas-stats span {
+    padding: 9px 10px;
+    border-radius: 8px;
+    background: rgba(65, 161, 70, 0.08);
+    color: var(--fnp-muted);
+    font-size: 12px;
+}
+
+.fnp-saas-stats b {
+    display: block;
+    color: var(--fnp-dark);
+    font-size: 18px;
+}
+
+.fnp-saas-meta {
+    display: grid;
+    gap: 6px;
+    min-height: 42px;
+    color: var(--fnp-muted);
+    font-size: 12px;
+}
+
+.fnp-saas-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.fnp-saas-kpi {
+    min-height: 112px;
+}
+
+.fnp-saas-kpi span {
+    display: block;
+    color: var(--fnp-muted);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+}
+
+.fnp-saas-kpi b {
+    display: block;
+    color: var(--fnp-dark);
+    font-size: 26px;
+    line-height: 1.2;
+    margin-top: 8px;
+}
+
+.fnp-saas-kpi small,
+.fnp-mini-tenant-card small {
+    display: block;
+    color: var(--fnp-muted);
+    margin-top: 6px;
+}
+
+.fnp-compact-table > thead > tr > th,
+.fnp-compact-table > tbody > tr > td {
+    vertical-align: middle !important;
+}
+
+.fnp-band-range {
+    display: grid;
+    grid-template-columns: minmax(58px, 1fr) auto minmax(58px, 1fr);
+    align-items: center;
+    gap: 6px;
+    min-width: 140px;
+}
+
+.fnp-inline-action {
+    display: inline-block;
+    margin: 0;
+}
+
+.fnp-actions-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.fnp-invoice-head {
+    border-bottom: 1px solid var(--fnp-border);
+    margin-bottom: 18px;
+    padding-bottom: 16px;
+}
+
+.fnp-invoice-status {
+    display: inline-block;
+    margin-bottom: 8px;
+    padding: 6px 10px;
+}
+
+.fnp-saas-dashboard-strip {
+    margin-bottom: 18px;
+}
+
+.fnp-saas-strip-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.fnp-saas-strip-head h2 {
+    margin: 4px 0 0;
+    color: var(--fnp-dark);
+    font-size: 21px;
+    font-weight: 900;
+}
+
+.fnp-mini-tenant-card {
+    min-height: 95px;
+}
+
+.fnp-mini-tenant-card strong,
+.fnp-mini-tenant-card span {
+    display: block;
+}
+
+.fnp-mini-tenant-card span {
+    color: var(--fnp-primary-dark);
+    font-size: 22px;
+    font-weight: 900;
+    margin-top: 8px;
+}
+
+.fnp-resend-otp {
+    margin-top: 10px;
+}
+
+@media (max-width: 767px) {
+    .fnp-saas-strip-head {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .fnp-band-range {
+        min-width: 170px;
+    }
+}
+
+.dark-mode .fnp-saas-card,
+.dark-mode .fnp-saas-page .box {
+    border-color: rgba(250, 204, 21, 0.18);
+    background: var(--fnp-card-bg);
+}
+
+.dark-mode .fnp-saas-card-head h4,
+.dark-mode .fnp-saas-stats b,
+.dark-mode .fnp-saas-kpi b,
+.dark-mode .fnp-saas-strip-head h2 {
+    color: #f8fafc;
+}
+
+.dark-mode .fnp-saas-stats span,
+.dark-mode .fnp-mini-tenant-card small {
+    background: rgba(74, 222, 128, 0.1);
+    color: var(--fnp-muted);
+}
+
+.dark-mode .fnp-saas-kpi span {
+    color: var(--fnp-muted);
 }

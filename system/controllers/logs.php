@@ -26,7 +26,8 @@ switch ($action) {
             ->select('description')
             ->select('userid')
             ->select('ip')
-            ->order_by_asc('id')->find_array();
+            ->order_by_asc('id');
+        $logs = Tenant::scopeIfTenant($logs)->find_array();
         $h = false;
         set_time_limit(-1);
         header('Pragma: public');
@@ -89,7 +90,8 @@ switch ($action) {
             ->select('status')
             ->select('error_message')
             ->select('sent_at')
-            ->order_by_asc('id')->find_array();
+            ->order_by_asc('id');
+        $logs = Tenant::scopeIfTenant($logs)->find_array();
         $h = false;
         set_time_limit(-1);
         header('Pragma: public');
@@ -117,14 +119,21 @@ switch ($action) {
         $q = (_post('q') ? _post('q') : _get('q'));
         $keep = _post('keep');
         if (!empty($keep)) {
-            ORM::raw_execute("DELETE FROM tbl_logs WHERE UNIX_TIMESTAMP(date) < UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL $keep DAY))");
+            $keepDays = max(1, (int) $keep);
+            if (class_exists('Tenant') && Tenant::isTenantRequest() && Tenant::hasColumn('tbl_logs', 'tenant_id')) {
+                ORM::raw_execute("DELETE FROM tbl_logs WHERE tenant_id = ? AND UNIX_TIMESTAMP(date) < UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL $keepDays DAY))", [Tenant::currentId()]);
+            } else {
+                ORM::raw_execute("DELETE FROM tbl_logs WHERE UNIX_TIMESTAMP(date) < UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL $keepDays DAY))");
+            }
             r2(getUrl('logs/list/'), 's', "Delete logs older than $keep days");
         }
         if ($q != '') {
             $query = ORM::for_table('tbl_logs')->where_like('description', '%' . $q . '%')->order_by_desc('id');
+            $query = Tenant::scopeIfTenant($query);
             $d = Paginator::findMany($query, ['q' => $q]);
         } else {
             $query = ORM::for_table('tbl_logs')->order_by_desc('id');
+            $query = Tenant::scopeIfTenant($query);
             $d = Paginator::findMany($query);
         }
 
@@ -156,7 +165,12 @@ switch ($action) {
         $q = _post('q') ?: _get('q');
         $keep = (int) _post('keep');
         if (!empty($keep)) {
-            ORM::raw_execute("DELETE FROM tbl_message_logs WHERE UNIX_TIMESTAMP(sent_at) < UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL $keep DAY))");
+            $keepDays = max(1, (int) $keep);
+            if (class_exists('Tenant') && Tenant::isTenantRequest() && Tenant::hasColumn('tbl_message_logs', 'tenant_id')) {
+                ORM::raw_execute("DELETE FROM tbl_message_logs WHERE tenant_id = ? AND UNIX_TIMESTAMP(sent_at) < UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL $keepDays DAY))", [Tenant::currentId()]);
+            } else {
+                ORM::raw_execute("DELETE FROM tbl_message_logs WHERE UNIX_TIMESTAMP(sent_at) < UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL $keepDays DAY))");
+            }
             r2(getUrl('logs/message/'), 's', "Deleted logs older than $keep days");
         }
 
@@ -164,9 +178,11 @@ switch ($action) {
             $query = ORM::for_table('tbl_message_logs')
             ->whereRaw("message_type LIKE '%$q%' OR recipient LIKE '%$q%' OR message_content LIKE '%$q%' OR status LIKE '%$q%' OR error_message LIKE '%$q%'")
                 ->order_by_desc('sent_at');
+            $query = Tenant::scopeIfTenant($query);
             $d = Paginator::findMany($query, ['q' => $q]);
         } else {
             $query = ORM::for_table('tbl_message_logs')->order_by_desc('sent_at');
+            $query = Tenant::scopeIfTenant($query);
             $d = Paginator::findMany($query);
         }
 

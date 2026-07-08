@@ -1,7 +1,9 @@
 </section>
 </div>
 <footer class="main-footer">
-    <div class="pull-right" id="version" onclick="location.href = '{Text::url('community')}#latestVersion';"></div>
+    {if !($_tenant_mode eq 'tenant' && $_admin['user_type'] neq 'SuperAdmin')}
+        <div class="pull-right" id="version" onclick="location.href = '{Text::url('community')}#latestVersion';"></div>
+    {/if}
     <div class="fnp-footer-content">
         <div class="fnp-footer-main">
             {if $_c['fastnetpay_footer_text'] neq ''}

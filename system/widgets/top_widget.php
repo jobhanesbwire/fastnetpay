@@ -10,8 +10,8 @@ class top_widget
         $iday = ORM::for_table('tbl_transactions')
             ->where('recharged_on', $current_date)
             ->where_not_equal('method', 'Customer - Balance')
-            ->where_not_equal('method', 'Recharge Balance - Administrator')
-            ->sum('price');
+            ->where_not_equal('method', 'Recharge Balance - Administrator');
+        $iday = Tenant::scopeIfTenant($iday)->sum('price');
 
         if ($iday == '') {
             $iday = '0.00';
@@ -22,26 +22,30 @@ class top_widget
             ->where_not_equal('method', 'Customer - Balance')
             ->where_not_equal('method', 'Recharge Balance - Administrator')
             ->where_gte('recharged_on', $start_date)
-            ->where_lte('recharged_on', $current_date)->sum('price');
+            ->where_lte('recharged_on', $current_date);
+        $imonth = Tenant::scopeIfTenant($imonth)->sum('price');
         if ($imonth == '') {
             $imonth = '0.00';
         }
         $ui->assign('imonth', $imonth);
 
-        $u_act = ORM::for_table('tbl_user_recharges')->where('status', 'on')->count();
+        $uActQuery = ORM::for_table('tbl_user_recharges')->where('status', 'on');
+        $u_act = Tenant::scopeIfTenant($uActQuery)->count();
         if (empty($u_act)) {
             $u_act = '0';
         }
         $ui->assign('u_act', $u_act);
 
-        $u_all = ORM::for_table('tbl_user_recharges')->count();
+        $uAllQuery = ORM::for_table('tbl_user_recharges');
+        $u_all = Tenant::scopeIfTenant($uAllQuery)->count();
         if (empty($u_all)) {
             $u_all = '0';
         }
         $ui->assign('u_all', $u_all);
 
 
-        $c_all = ORM::for_table('tbl_customers')->count();
+        $cAllQuery = ORM::for_table('tbl_customers');
+        $c_all = Tenant::scopeIfTenant($cAllQuery)->count();
         if (empty($c_all)) {
             $c_all = '0';
         }
@@ -53,8 +57,8 @@ class top_widget
     private function getRouterStats($current_date, $start_date)
     {
         $routers = ORM::for_table('tbl_routers')
-            ->order_by_asc('name')
-            ->find_many();
+            ->order_by_asc('name');
+        $routers = Tenant::scopeIfTenant($routers)->find_many();
 
         $stats = [];
         foreach ($routers as $router) {
@@ -65,24 +69,24 @@ class top_widget
 
             $activeUsers = ORM::for_table('tbl_user_recharges')
                 ->where('routers', $routerName)
-                ->where('status', 'on')
-                ->count();
+                ->where('status', 'on');
+            $activeUsers = Tenant::scopeIfTenant($activeUsers)->count();
 
             $totalRow = ORM::for_table('tbl_user_recharges')
                 ->select_expr('COUNT(DISTINCT username)', 'total')
-                ->where('routers', $routerName)
-                ->find_one();
+                ->where('routers', $routerName);
+            $totalRow = Tenant::scopeIfTenant($totalRow)->find_one();
             $totalUsers = $totalRow ? (int) $totalRow->total : 0;
 
             $hotspotUsers = ORM::for_table('tbl_user_recharges')
                 ->where('routers', $routerName)
-                ->where('type', 'Hotspot')
-                ->count();
+                ->where('type', 'Hotspot');
+            $hotspotUsers = Tenant::scopeIfTenant($hotspotUsers)->count();
 
             $pppoeUsers = ORM::for_table('tbl_user_recharges')
                 ->where('routers', $routerName)
-                ->where('type', 'PPPOE')
-                ->count();
+                ->where('type', 'PPPOE');
+            $pppoeUsers = Tenant::scopeIfTenant($pppoeUsers)->count();
 
             $incomeToday = $this->sumRouterIncome($routerName, $current_date, $current_date);
             $incomeMonth = $this->sumRouterIncome($routerName, $start_date, $current_date);
@@ -116,8 +120,8 @@ class top_widget
             ->where_not_equal('method', 'Customer - Balance')
             ->where_not_equal('method', 'Recharge Balance - Administrator')
             ->where_gte('recharged_on', $startDate)
-            ->where_lte('recharged_on', $endDate)
-            ->sum('price');
+            ->where_lte('recharged_on', $endDate);
+        $sum = Tenant::scopeIfTenant($sum)->sum('price');
 
         return $sum == '' ? 0 : $sum;
     }

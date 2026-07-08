@@ -160,6 +160,18 @@
         }
     }
 
+    function renderPortalRefresh(data) {
+        var target = document.getElementById('fnpProvisionPortalRefreshResult');
+        if (!target) {
+            return;
+        }
+        target.innerHTML = '<div class="fnp-provision-run-card ' + (data.ok ? 'is-success' : 'is-error') + '">' +
+            '<h4>' + (data.ok ? 'Captive portal files refreshed' : 'Portal refresh failed') + '</h4>' +
+            '<p>' + escapeHtml(data.message || '') + '</p>' +
+            '<small>Router #' + escapeHtml(data.router_id || '') + ' · Connection: ' + escapeHtml(data.connection_status || '') + '</small>' +
+            '</div>';
+    }
+
     function renderFinal(result) {
         var target = document.getElementById('fnpProvisionFinalResult');
         if (!target) {
@@ -293,6 +305,20 @@
                 renderRun({ ok: false, run_id: '', steps: [{ name: 'Provisioning', status: 'failed', message: error.message }] });
             }).finally(function () {
                 setBusy(run, false);
+            });
+        });
+    }
+
+    var refreshPortal = document.getElementById('fnpProvisionRefreshPortal');
+    if (refreshPortal) {
+        refreshPortal.addEventListener('click', function () {
+            setBusy(refreshPortal, true, 'Refreshing');
+            request(route('routers/provision-refresh-portal')).then(function (data) {
+                renderPortalRefresh(data);
+            }).catch(function (error) {
+                renderPortalRefresh({ ok: false, message: error.message, router_id: routerId, connection_status: 'failed' });
+            }).finally(function () {
+                setBusy(refreshPortal, false);
             });
         });
     }

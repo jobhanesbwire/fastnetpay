@@ -128,9 +128,17 @@
                         <label>LAN Bridge / Interface <input type="text" name="lan_interface" class="form-control" value="{$settings.lan_interface|escape}" placeholder="fastnetpay-bridge" list="fnpProvisionInterfaceOptions"></label>
                         <label>Hotspot Interface <input type="text" name="hotspot_interface" class="form-control" value="{$settings.hotspot_interface|escape}" placeholder="fastnetpay-bridge" list="fnpProvisionInterfaceOptions"></label>
                         <label>PPPoE Interface <input type="text" name="pppoe_interface" class="form-control" value="{$settings.pppoe_interface|escape}" placeholder="fastnetpay-bridge" list="fnpProvisionInterfaceOptions"></label>
-                        <label>Management Interface <input type="text" name="management_interface" class="form-control" value="{$settings.management_interface|escape}" placeholder="ether4" list="fnpProvisionInterfaceOptions"><small class="fnp-provision-muted">Default is <code>ether4</code>. The wizard keeps this port out of the Hotspot bridge for management access.</small></label>
-                    </div>
-                    <datalist id="fnpProvisionInterfaceOptions">
+                            <label>Management Port: Safe admin access only, one device allowed <input type="text" name="management_interface" class="form-control" value="{$settings.management_interface|escape}" placeholder="ether4" list="fnpProvisionInterfaceOptions"><small class="fnp-provision-muted">Recommended: <code>ether4</code>. This port stays out of the customer bridge, keeps internet for admin work, and can be bound to one trusted device.</small></label>
+                            <label>Management Device IP <input type="text" name="management_ip" class="form-control" value="{$settings.management_ip|escape}" placeholder="192.168.88.10"><small class="fnp-provision-muted">Used for a controlled single-device lease when you bind a MAC.</small></label>
+                            <label>Trusted Management MAC <input type="text" name="management_allowed_mac" class="form-control" value="{$settings.management_allowed_mac|escape}" placeholder="AA:BB:CC:DD:EE:FF"><small class="fnp-provision-muted">Optional, but recommended. When set, unknown devices on the management port are blocked where RouterOS bridge filtering supports it.</small></label>
+                            <label>Max Management Devices <input type="number" name="management_max_devices" class="form-control" value="{$settings.management_max_devices|escape}" min="1" max="4"><small class="fnp-provision-muted">The wizard warns if more devices are detected.</small></label>
+                        </div>
+                        <input type="hidden" name="management_bind_mac" value="no">
+                        <label class="fnp-provision-check">
+                            <input type="checkbox" name="management_bind_mac" value="yes" {if $settings.management_bind_mac eq 'yes'}checked{/if}>
+                            Bind management access to the trusted MAC when supplied
+                        </label>
+                        <datalist id="fnpProvisionInterfaceOptions">
                         <option value="ether1">
                         <option value="ether2">
                         <option value="ether3">
@@ -183,12 +191,19 @@
 
             <section id="step-portal" class="fnp-provision-step-panel">
                 <div class="fnp-provision-card">
-                    <h3>Captive Portal Setup</h3>
+                    <div class="fnp-provision-card-head">
+                        <div>
+                            <h3>Captive Portal Setup</h3>
+                            <p>Pushes the MikroTik-hosted FASTNETPAY portal files without rerunning full provisioning.</p>
+                        </div>
+                        <button type="button" id="fnpProvisionRefreshPortal" class="btn btn-primary" {if !$router_id}disabled{/if}><i class="fa fa-refresh"></i> Refresh Captive Portal Files</button>
+                    </div>
                     <div class="fnp-provision-radio-grid">
                         <label><input type="radio" name="portal_mode" value="static" {if $settings.portal_mode eq 'static'}checked{/if}> <span><b>MikroTik Hosted Portal</b><small>Router stores lightweight FASTNETPAY files and calls customer-safe payment APIs.</small></span></label>
                         <label><input type="radio" name="portal_mode" value="fastnetpay" {if $settings.portal_mode eq 'fastnetpay'}checked{/if}> <span><b>FASTNETPAY Hosted Portal</b><small>MikroTik redirects users to FASTNETPAY package/payment pages.</small></span></label>
                     </div>
                     <p class="fnp-provision-muted">Customer API: <code>{$app_url}/?_route=api/hotspot</code>. The generated MikroTik files do not redirect users to the admin dashboard.</p>
+                    <div id="fnpProvisionPortalRefreshResult" class="fnp-provision-run-result"></div>
                 </div>
             </section>
 
@@ -210,10 +225,39 @@
                 </div>
             </section>
 
-            <section id="step-security" class="fnp-provision-step-panel">
-                <div class="fnp-provision-card">
-                    <h3>Security Setup</h3>
-                    <div class="fnp-provision-radio-grid">
+                <section id="step-security" class="fnp-provision-step-panel">
+                    <div class="fnp-provision-card">
+                        <h3>Security Setup</h3>
+                        <div class="fnp-provision-callout">
+                            <strong>Recommended for beginners:</strong> keep Default Local Setup while testing on-site. Use WireGuard or SSTP when this router will be managed remotely through VPN.
+                        </div>
+                        <h4 class="fnp-provision-subtitle">Connection Mode</h4>
+                        <div class="fnp-provision-radio-grid">
+                            <label><input type="radio" name="connection_mode" value="local" {if $settings.connection_mode eq 'local'}checked{/if}> <span><b>Default Local Setup</b><small>Use LAN/local router IP. No VPN required.</small></span></label>
+                            <label><input type="radio" name="connection_mode" value="wireguard" {if $settings.connection_mode eq 'wireguard'}checked{/if}> <span><b>WireGuard VPN</b><small>Best for RouterOS v7 remote sites.</small></span></label>
+                            <label><input type="radio" name="connection_mode" value="sstp" {if $settings.connection_mode eq 'sstp'}checked{/if}> <span><b>SSTP VPN</b><small>Fallback for older RouterOS v6 routers.</small></span></label>
+                        </div>
+                        <div class="fnp-provision-grid">
+                            <label>FASTNETPAY/VPN Server IP <input type="text" name="vpn_server_ip" class="form-control" value="{$settings.vpn_server_ip|escape}" placeholder="10.100.0.1"></label>
+                            <label>Router VPN IP <input type="text" name="vpn_router_ip" class="form-control" value="{$settings.vpn_router_ip|escape}" placeholder="10.100.1.1"></label>
+                            <label>WireGuard Listen Port <input type="number" name="vpn_port" class="form-control" value="{$settings.vpn_port|escape}" min="1" max="65535"></label>
+                            <label>Secure Management URL <input type="url" name="secure_management_url" class="form-control" value="{$settings.secure_management_url|escape}" placeholder="https://fastnetpay.co.ke:3054"></label>
+                            <label>WireGuard Router Private Key <input type="password" name="wireguard_private_key" class="form-control" value="{$settings.wireguard_private_key|escape}" autocomplete="new-password"></label>
+                            <label>WireGuard FASTNETPAY Public Key <input type="text" name="wireguard_public_key" class="form-control" value="{$settings.wireguard_public_key|escape}"></label>
+                            <label>SSTP Server <input type="text" name="sstp_server" class="form-control" value="{$settings.sstp_server|escape}" placeholder="vpn.fastnetpay.co.ke"></label>
+                            <label>SSTP Username <input type="text" name="sstp_username" class="form-control" value="{$settings.sstp_username|escape}" autocomplete="off"></label>
+                            <label>SSTP Password <input type="password" name="sstp_password" class="form-control" value="{$settings.sstp_password|escape}" autocomplete="new-password"></label>
+                            <label>Future Tenant ID <input type="number" name="tenant_id" class="form-control" value="{$settings.tenant_id|escape}" min="0"><small class="fnp-provision-muted">Leave 0 in current single-tenant FASTNETPAY.</small></label>
+                            <label>Future Site ID <input type="number" name="site_id" class="form-control" value="{$settings.site_id|escape}" min="0"></label>
+                            <label>Router Group / Site Name <input type="text" name="router_group" class="form-control" value="{$settings.router_group|escape}" placeholder="Narok Main Site"></label>
+                        </div>
+                        <input type="hidden" name="api_restrict_mode" value="local">
+                        <label class="fnp-provision-check">
+                            <input type="checkbox" name="api_restrict_mode" value="vpn" {if $settings.api_restrict_mode eq 'vpn'}checked{/if}>
+                            Restrict RouterOS API to the VPN server IP after VPN is tested
+                        </label>
+                        <h4 class="fnp-provision-subtitle">Firewall Profile</h4>
+                        <div class="fnp-provision-radio-grid">
                         <label><input type="radio" name="security_level" value="basic" {if $settings.security_level eq 'basic'}checked{/if}> <span><b>Basic</b><small>Safer API access and invalid packet drops.</small></span></label>
                         <label><input type="radio" name="security_level" value="recommended" {if $settings.security_level eq 'recommended'}checked{/if}> <span><b>Recommended</b><small>DDoS/DoS guardrails, DNS abuse protection, port scan lists.</small></span></label>
                         <label><input type="radio" name="security_level" value="strict" {if $settings.security_level eq 'strict'}checked{/if}> <span><b>Strict ISP Mode</b><small>Restricts management services to FASTNETPAY server IP.</small></span></label>

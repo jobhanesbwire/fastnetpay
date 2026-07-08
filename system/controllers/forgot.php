@@ -26,7 +26,8 @@ if ($step == 1) {
             mkdir($otpPath);
         }
         setcookie('forgot_username', $username, time() + 3600, '/');
-        $user = ORM::for_table('tbl_customers')->selects(['phonenumber', 'email'])->where('username', $username)->find_one();
+        $userQuery = ORM::for_table('tbl_customers')->selects(['phonenumber', 'email'])->where('username', $username);
+        $user = Tenant::scopeIfTenant($userQuery)->find_one();
         if ($user) {
             $otpPath .= sha1($username . $db_pass) . ".txt";
             if (file_exists($otpPath) && time() - filemtime($otpPath) < 600) {
@@ -70,7 +71,8 @@ if ($step == 1) {
             $otp = file_get_contents($otpPath);
             if ($otp == $otp_code) {
                 $pass = mt_rand(10000, 99999);
-                $user = ORM::for_table('tbl_customers')->where('username', $username)->find_one();
+                $userQuery = ORM::for_table('tbl_customers')->where('username', $username);
+                $user = Tenant::scopeIfTenant($userQuery)->find_one();
                 $user->password = $pass;
                 $user->save();
                 $ui->assign('username', $username);
@@ -105,7 +107,8 @@ if ($step == 1) {
             mkdir($otpPath);
         }
         $otpPath .= sha1($find . $db_pass) . ".txt";
-        $users = ORM::for_table('tbl_customers')->selects(['username', 'phonenumber', 'email'])->where('phonenumber', $find)->find_array();
+        $usersQuery = ORM::for_table('tbl_customers')->selects(['username', 'phonenumber', 'email'])->where('phonenumber', $find);
+        $users = Tenant::scopeIfTenant($usersQuery)->find_array();
         if ($users) {
             // prevent flooding only can request every 10 minutes
             if (!file_exists($otpPath) || (file_exists($otpPath) && time() - filemtime($otpPath) >= 600)) {
@@ -121,7 +124,8 @@ if ($step == 1) {
             $ui->assign('notify', Lang::T("Usernames have been sent to your phone/Whatsapp") . " $find");
             $step = 0;
         } else {
-            $users = ORM::for_table('tbl_customers')->selects(['username', 'phonenumber', 'email'])->where('email', $find)->find_array();
+            $usersQuery = ORM::for_table('tbl_customers')->selects(['username', 'phonenumber', 'email'])->where('email', $find);
+            $users = Tenant::scopeIfTenant($usersQuery)->find_array();
             if ($users) {
                 // prevent flooding only can request every 10 minutes
                 if (!file_exists($otpPath) || (file_exists($otpPath) && time() - filemtime($otpPath) >= 600)) {

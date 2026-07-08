@@ -107,7 +107,11 @@ class Radius
 	
 	function sync_customer($customer, $plan)
     {	
-		$t = ORM::for_table('tbl_user_recharges')->where('username', $customer['username'])->where('status', 'on')->findOne();
+		$query = ORM::for_table('tbl_user_recharges')->where('username', $customer['username'])->where('status', 'on');
+		if (class_exists('Tenant')) {
+			$query = Tenant::scopeIfTenant($query);
+		}
+		$t = $query->findOne();
         $date_exp = $t['expiration'];
         $time = $t['time'];
         $this->customerAddPlan($customer, $plan, $date_exp . ' ' . $time);

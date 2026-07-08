@@ -157,6 +157,17 @@ function talksasa_config($key, $default = '')
 {
     global $config;
 
+    if (class_exists('Tenant')) {
+        $tenantRow = ORM::for_table('tenant_settings')
+            ->where('tenant_id', Tenant::currentId())
+            ->where('namespace', 'sms')
+            ->where('setting', $key)
+            ->find_one();
+        if ($tenantRow) {
+            return (string) $tenantRow['value'];
+        }
+    }
+
     if (isset($config[$key]) && $config[$key] !== '') {
         return $config[$key];
     }
@@ -167,6 +178,11 @@ function talksasa_config($key, $default = '')
 
 function talksasa_save_setting($setting, $value)
 {
+    if (class_exists('Tenant') && Tenant::isTenantRequest()) {
+        Tenant::saveSetting('sms', $setting, (string) $value, $setting === 'talksasa_api_token');
+        return;
+    }
+
     $row = ORM::for_table('tbl_appconfig')->where('setting', $setting)->find_one();
     if (!$row) {
         $row = ORM::for_table('tbl_appconfig')->create();

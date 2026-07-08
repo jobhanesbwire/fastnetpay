@@ -7,7 +7,8 @@ class default_info_row
         global $config,$ui;
 
         if ($config['enable_balance'] == 'yes'){
-            $cb = ORM::for_table('tbl_customers')->whereGte('balance', 0)->sum('balance');
+            $query = ORM::for_table('tbl_customers')->whereGte('balance', 0);
+            $cb = Tenant::scopeIfTenant($query)->sum('balance');
             $ui->assign('cb', $cb);
         }
 

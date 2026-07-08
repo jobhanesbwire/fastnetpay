@@ -20,10 +20,12 @@ switch ($action) {
     case 'history':
         $ui->assign('_system_menu', 'history');
         $query = ORM::for_table('tbl_payment_gateway')->where('user_id', $user['id'])->order_by_desc('id');
+        $query = Tenant::scopeIfTenant($query);
         $d = Paginator::findMany($query);
 
         if (empty($order) || $order < 5) {
             $query = ORM::for_table('tbl_payment_gateway')->where('username', $user['username'])->order_by_desc('id');
+            $query = Tenant::scopeIfTenant($query);
             $d = Paginator::findMany($query);
         }
 
@@ -38,7 +40,8 @@ switch ($action) {
         }
         $ui->assign('_title', 'Top Up');
         $ui->assign('_system_menu', 'balance');
-        $plans_balance = ORM::for_table('tbl_plans')->where('enabled', '1')->where('type', 'Balance')->where('prepaid', 'yes')->find_many();
+        $plansBalanceQuery = ORM::for_table('tbl_plans')->where('enabled', '1')->where('type', 'Balance')->where('prepaid', 'yes');
+        $plans_balance = Tenant::scopeIfTenant($plansBalanceQuery)->find_many();
         $ui->assign('plans_balance', $plans_balance);
         $ui->display('customer/orderBalance.tpl');
         break;
@@ -59,15 +62,18 @@ switch ($action) {
                     ->where('enabled', '1')
                     ->where('is_radius', 1)
                     ->where('type', 'PPPOE')
-                    ->where('prepaid', 'yes')->find_many();
+                    ->where('prepaid', 'yes');
+                $radius_pppoe = Tenant::scopeIfTenant($radius_pppoe)->find_many();
                 $radius_hotspot = ORM::for_table('tbl_plans')
                     ->where('plan_type', $account_type)
                     ->where('enabled', '1')
                     ->where('is_radius', 1)
                     ->where('type', 'Hotspot')
-                    ->where('prepaid', 'yes')->find_many();
+                    ->where('prepaid', 'yes');
+                $radius_hotspot = Tenant::scopeIfTenant($radius_hotspot)->find_many();
             } else {
-                $routers = ORM::for_table('tbl_routers')->where('id', $_SESSION['nux-router'])->find_many();
+                $routerQuery = ORM::for_table('tbl_routers')->where('id', $_SESSION['nux-router']);
+                $routers = Tenant::scopeIfTenant($routerQuery)->find_many();
                 $rs = [];
                 foreach ($routers as $r) {
                     $rs[] = $r['name'];
@@ -78,16 +84,16 @@ switch ($action) {
                     ->where_in('routers', $rs)
                     ->where('is_radius', 0)
                     ->where('type', 'PPPOE')
-                    ->where('prepaid', 'yes')
-                    ->find_many();
+                    ->where('prepaid', 'yes');
+                $plans_pppoe = Tenant::scopeIfTenant($plans_pppoe)->find_many();
                 $plans_hotspot = ORM::for_table('tbl_plans')
                     ->where('plan_type', $account_type)
                     ->where('enabled', '1')
                     ->where_in('routers', $rs)
                     ->where('is_radius', 0)
                     ->where('type', 'Hotspot')
-                    ->where('prepaid', 'yes')
-                    ->find_many();
+                    ->where('prepaid', 'yes');
+                $plans_hotspot = Tenant::scopeIfTenant($plans_hotspot)->find_many();
             }
         } else {
             $radius_pppoe = ORM::for_table('tbl_plans')
@@ -95,36 +101,36 @@ switch ($action) {
                 ->where('enabled', '1')
                 ->where('is_radius', 1)
                 ->where('type', 'PPPOE')
-                ->where('prepaid', 'yes')
-                ->find_many();
+                ->where('prepaid', 'yes');
+            $radius_pppoe = Tenant::scopeIfTenant($radius_pppoe)->find_many();
             $radius_hotspot = ORM::for_table('tbl_plans')
                 ->where('plan_type', $account_type)
                 ->where('enabled', '1')
                 ->where('is_radius', 1)
                 ->where('type', 'Hotspot')
-                ->where('prepaid', 'yes')
-                ->find_many();
+                ->where('prepaid', 'yes');
+            $radius_hotspot = Tenant::scopeIfTenant($radius_hotspot)->find_many();
 
-            $routers = ORM::for_table('tbl_routers')->find_many();
+            $routers = Tenant::scopeIfTenant(ORM::for_table('tbl_routers'))->find_many();
             $plans_pppoe = ORM::for_table('tbl_plans')
                 ->where('plan_type', $account_type)
                 ->where('enabled', '1')
                 ->where('is_radius', 0)
                 ->where('type', 'PPPOE')
-                ->where('prepaid', 'yes')
-                ->find_many();
+                ->where('prepaid', 'yes');
+            $plans_pppoe = Tenant::scopeIfTenant($plans_pppoe)->find_many();
             $plans_hotspot = ORM::for_table('tbl_plans')
                 ->where('plan_type', $account_type)
                 ->where('enabled', '1')->where('is_radius', 0)
                 ->where('type', 'Hotspot')
-                ->where('prepaid', 'yes')
-                ->find_many();
+                ->where('prepaid', 'yes');
+            $plans_hotspot = Tenant::scopeIfTenant($plans_hotspot)->find_many();
             $plans_vpn = ORM::for_table('tbl_plans')
                 ->where('plan_type', $account_type)
                 ->where('enabled', '1')->where('is_radius', 0)
                 ->where('type', 'VPN')
-                ->where('prepaid', 'yes')
-                ->find_many();
+                ->where('prepaid', 'yes');
+            $plans_vpn = Tenant::scopeIfTenant($plans_vpn)->find_many();
         }
         $ui->assign('routers', $routers);
         $ui->assign('radius_pppoe', $radius_pppoe);

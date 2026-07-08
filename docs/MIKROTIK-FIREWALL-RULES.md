@@ -110,7 +110,7 @@ add chain=forward action=drop connection-nat-state=!dstnat connection-state=new 
 add chain=forward action=accept in-interface-list=LAN out-interface-list=WAN comment="Allow customers to internet after hotspot/PPPoE policy"
 ```
 
-FastTrack caution: do not FastTrack managed customer traffic until you have verified it does not bypass queues, hotspot visibility, accounting, or shaping requirements.
+FastTrack caution: do not FastTrack managed customer traffic until you have verified it does not bypass queues, hotspot visibility, accounting, or shaping requirements. FASTNETPAY provisioning adds `FASTNETPAY hotspot queue guard upload` and `FASTNETPAY hotspot queue guard download` before the default FastTrack rule so Hotspot package speeds continue to be enforced.
 
 ## Router Management Brute Force Protection
 

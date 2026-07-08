@@ -11,11 +11,17 @@
 
     function setMode(mode) {
         var body = document.body;
+        var root = document.documentElement;
+        var wrapper = document.querySelector('.wrapper');
         var toggle = document.getElementById('themeToggle');
         var icon = document.getElementById('toggleIcon');
         var isDark = mode === 'dark';
 
+        root.classList.toggle('dark-mode', isDark);
         body.classList.toggle('dark-mode', isDark);
+        if (wrapper) {
+            wrapper.classList.toggle('dark-mode', isDark);
+        }
         if (toggle) {
             toggle.setAttribute('aria-pressed', isDark ? 'true' : 'false');
             toggle.classList.toggle('is-dark', isDark);
@@ -26,7 +32,7 @@
     }
 
     ready(function () {
-        var savedMode = localStorage.getItem('mode');
+        var savedMode = localStorage.getItem('fastnetpay-theme-mode') || localStorage.getItem('mode');
         setMode(savedMode === 'dark' ? 'dark' : 'light');
 
         var themeToggle = document.getElementById('themeToggle');
@@ -35,6 +41,7 @@
                 event.preventDefault();
                 var next = document.body.classList.contains('dark-mode') ? 'light' : 'dark';
                 localStorage.setItem('mode', next);
+                localStorage.setItem('fastnetpay-theme-mode', next);
                 setMode(next);
             });
         }

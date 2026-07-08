@@ -39,11 +39,11 @@ switch ($action) {
         $te = _req('te', '23:59:59');
         $types = ORM::for_table('tbl_transactions')->getEnum('type');
         $tps = ($_GET['tps']) ? $_GET['tps'] : $types;
-        $plans = array_column(ORM::for_table('tbl_transactions')->select('plan_name')->distinct('plan_name')->find_array(), 'plan_name');
+        $plans = reports_distinct_transactions('plan_name');
         $plns = ($_GET['plns']) ? $_GET['plns'] : $plans;
-        $methods = array_column(ORM::for_table('tbl_transactions')->rawQuery("SELECT DISTINCT SUBSTRING_INDEX(`method`, ' - ', 1) as method FROM tbl_transactions;")->findArray(), 'method');
+        $methods = reports_distinct_methods();
         $mts = ($_GET['mts']) ? $_GET['mts'] : $methods;
-        $routers = array_column(ORM::for_table('tbl_transactions')->select('routers')->distinct('routers')->find_array(), 'routers');
+        $routers = reports_distinct_transactions('routers');
         $rts = ($_GET['rts']) ? $_GET['rts'] : $routers;
         $result = [];
         switch ($data) {
@@ -53,6 +53,7 @@ switch ($action) {
                         ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) >= " . strtotime("$sd $ts"))
                         ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) <= " . strtotime("$ed $te"))
                         ->where('type', $tp);
+                    $query = Tenant::scopeIfTenant($query);
                     if (count($mts) > 0) {
                         if (count($mts) != count($methods)) {
                             $w = [];
@@ -83,6 +84,7 @@ switch ($action) {
                         ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) >= " . strtotime("$sd $ts"))
                         ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) <= " . strtotime("$ed $te"))
                         ->where('plan_name', $pln);
+                    $query = Tenant::scopeIfTenant($query);
                     if (count($tps) > 0) {
                         $query->where_in('type', $tps);
                     }
@@ -113,6 +115,7 @@ switch ($action) {
                         ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) >= " . strtotime("$sd $ts"))
                         ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) <= " . strtotime("$ed $te"))
                         ->where_like('method', "$mt - %");
+                    $query = Tenant::scopeIfTenant($query);
                     if (count($tps) > 0) {
                         $query->where_in('type', $tps);
                     }
@@ -135,6 +138,7 @@ switch ($action) {
                         ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) >= " . strtotime("$sd $ts"))
                         ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) <= " . strtotime("$ed $te"))
                         ->where('routers', $rt);
+                    $query = Tenant::scopeIfTenant($query);
                     if (count($tps) > 0) {
                         $query->where_in('type', $tps);
                     }
@@ -153,6 +157,7 @@ switch ($action) {
                     ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) >= " . strtotime("$sd $ts"))
                     ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) <= " . strtotime("$ed $te"))
                     ->order_by_desc('id');
+                $query = Tenant::scopeIfTenant($query);
                 if (count($tps) > 0) {
                     $query->where_in('type', $tps);
                 }
@@ -262,14 +267,21 @@ switch ($action) {
         $q = (_post('q') ? _post('q') : _get('q'));
         $keep = _post('keep');
         if (!empty($keep)) {
-            ORM::raw_execute("DELETE FROM tbl_transactions WHERE date < UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL $keep DAY))");
+            $keepDays = max(1, (int) $keep);
+            if (class_exists('Tenant') && Tenant::isTenantRequest() && Tenant::hasColumn('tbl_transactions', 'tenant_id')) {
+                ORM::raw_execute("DELETE FROM tbl_transactions WHERE tenant_id = ? AND date < UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL $keepDays DAY))", [Tenant::currentId()]);
+            } else {
+                ORM::raw_execute("DELETE FROM tbl_transactions WHERE date < UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL $keepDays DAY))");
+            }
             r2(getUrl('logs/list/'), 's', "Delete logs older than $keep days");
         }
         if ($q != '') {
             $query = ORM::for_table('tbl_transactions')->where_like('invoice', '%' . $q . '%')->order_by_desc('id');
+            $query = Tenant::scopeIfTenant($query);
             $d = Paginator::findMany($query, ['q' => $q]);
         } else {
             $query = ORM::for_table('tbl_transactions')->order_by_desc('id');
+            $query = Tenant::scopeIfTenant($query);
             $d = Paginator::findMany($query);
         }
 
@@ -328,6 +340,7 @@ switch ($action) {
         $stype = _post('stype');
 
         $d = ORM::for_table('tbl_transactions');
+        $d = Tenant::scopeIfTenant($d);
         if ($stype != '') {
             $d->where('type', $stype);
         }
@@ -338,6 +351,7 @@ switch ($action) {
         $x =  $d->find_many();
 
         $dr = ORM::for_table('tbl_transactions');
+        $dr = Tenant::scopeIfTenant($dr);
         if ($stype != '') {
             $dr->where('type', $stype);
         }
@@ -360,9 +374,9 @@ switch ($action) {
     case 'daily-report':
     default:
         $types = ORM::for_table('tbl_transactions')->getEnum('type');
-        $methods = array_column(ORM::for_table('tbl_transactions')->rawQuery("SELECT DISTINCT SUBSTRING_INDEX(`method`, ' - ', 1) as method FROM tbl_transactions;")->findArray(), 'method');
-        $routers = array_column(ORM::for_table('tbl_transactions')->select('routers')->distinct('routers')->find_array(), 'routers');
-        $plans = array_column(ORM::for_table('tbl_transactions')->select('plan_name')->distinct('plan_name')->find_array(), 'plan_name');
+        $methods = reports_distinct_methods();
+        $routers = reports_distinct_transactions('routers');
+        $plans = reports_distinct_transactions('plan_name');
         $reset_day = $config['reset_day'];
         if (empty($reset_day)) {
             $reset_day = 1;
@@ -388,6 +402,7 @@ switch ($action) {
             ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) >= " . strtotime("$sd $ts"))
             ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) <= " . strtotime("$ed $te"))
             ->order_by_desc('id');
+        $query = Tenant::scopeIfTenant($query);
         if (count($tps) > 0) {
             $query->where_in('type', $tps);
         }
@@ -446,6 +461,7 @@ function reports_mpesa_query($sd, $ed, $status = 'all', $q = '')
         ->where_gte('created_date', $sd . ' 00:00:00')
         ->where_lte('created_date', $ed . ' 23:59:59')
         ->order_by_desc('id');
+    $query = Tenant::scopeIfTenant($query);
 
     if ($status !== 'all') {
         $query->where('status', (int) $status);
@@ -460,6 +476,32 @@ function reports_mpesa_query($sd, $ed, $status = 'all', $q = '')
     }
 
     return $query;
+}
+
+function reports_distinct_transactions($column)
+{
+    $column = in_array($column, ['plan_name', 'routers'], true) ? $column : 'plan_name';
+    $query = ORM::for_table('tbl_transactions')
+        ->select($column)
+        ->distinct($column)
+        ->where_not_equal($column, '');
+    $query = Tenant::scopeIfTenant($query);
+    return array_column($query->find_array(), $column);
+}
+
+function reports_distinct_methods()
+{
+    $query = ORM::for_table('tbl_transactions')->select('method')->distinct('method')->where_not_equal('method', '');
+    $query = Tenant::scopeIfTenant($query);
+    $methods = [];
+    foreach ($query->find_array() as $row) {
+        $method = trim((string) ($row['method'] ?? ''));
+        if ($method === '') {
+            continue;
+        }
+        $methods[] = trim(explode(' - ', $method)[0]);
+    }
+    return array_values(array_unique($methods));
 }
 
 function reports_mpesa_summary($sd, $ed, $q = '')

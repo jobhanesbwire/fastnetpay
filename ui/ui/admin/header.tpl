@@ -27,7 +27,17 @@
     <script src="{$app_url}/ui/ui/scripts/sweetalert2.all.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@3.5.1/dist/chart.min.js"></script>
     <style>
+        {if isset($_tenant) && $_tenant}
+        :root {
+            --fnp-primary: {$_tenant.primary_color|default:'#41a146'};
+            --fnp-secondary: {$_tenant.secondary_color|default:'#f9c02b'};
+        }
 
+        .dark-mode {
+            --fnp-primary: {$_tenant.dark_primary_color|default:'#4ade80'};
+            --fnp-secondary: {$_tenant.dark_secondary_color|default:'#facc15'};
+        }
+        {/if}
     </style>
     {if isset($xheader)}
         {$xheader}
@@ -48,6 +58,14 @@
                 </a>
                 <div class="navbar-custom-menu">
                     <ul class="nav navbar-nav fnp-navbar-actions">
+                        {if isset($_tenant) && $_tenant}
+                            <li class="hidden-xs">
+                                <span class="fnp-tenant-pill">
+                                    <i class="fa fa-building"></i>
+                                    {if $_tenant_mode eq 'tenant'}{$_tenant.name}{else}Mother System{/if}
+                                </span>
+                            </li>
+                        {/if}
                         <li>
                             <button id="openSearch" type="button" class="fnp-nav-icon" aria-label="{Lang::T('Search Users')}">
                                 <i class="fa fa-search"></i>
@@ -117,6 +135,7 @@
         <aside class="main-sidebar">
             <section class="sidebar">
                 <ul class="sidebar-menu" data-widget="tree">
+                    {assign var=isTenantPortal value=($_tenant_mode eq 'tenant' && $_admin['user_type'] neq 'SuperAdmin')}
                     <li {if $_system_menu eq 'dashboard'}class="active"{/if}>
                         <a href="{Text::url('dashboard')}">
                             <i class="ion ion-monitor"></i>
@@ -124,6 +143,47 @@
                         </a>
                     </li>
                     {$_MENU_AFTER_DASHBOARD}
+
+                    {if $_admin['user_type'] eq 'SuperAdmin'}
+                        <li class="{if $_routes[0] eq 'saas'}active{/if} treeview">
+                            <a href="#">
+                                <i class="fa fa-sitemap"></i> <span>SaaS Management</span>
+                                <span class="pull-right-container"><i class="fa fa-angle-left pull-right"></i></span>
+                            </a>
+                            <ul class="treeview-menu">
+                                <li {if $_routes[0] eq 'saas' && ($_routes[1] eq '' || $_routes[1] eq 'tenants')}class="active"{/if}>
+                                    <a href="{Text::url('saas/tenants')}">Tenants / ISPs</a>
+                                </li>
+                                <li {if $_routes[0] eq 'saas' && $_routes[1] eq 'add'}class="active"{/if}>
+                                    <a href="{Text::url('saas/add')}">Add Tenant</a>
+                                </li>
+                                <li {if $_routes[0] eq 'saas' && $_routes[1] eq 'domains'}class="active"{/if}>
+                                    <a href="{Text::url('saas/domains')}">Tenant Domains</a>
+                                </li>
+                                <li {if $_routes[0] eq 'saas' && $_routes[1] eq 'admins'}class="active"{/if}>
+                                    <a href="{Text::url('saas/admins')}">Tenant Admins</a>
+                                </li>
+                                <li {if $_routes[0] eq 'saas' && $_routes[1] eq 'billing'}class="active"{/if}>
+                                    <a href="{Text::url('saas/billing')}">Plans / Billing</a>
+                                </li>
+                                <li {if $_routes[0] eq 'saas' && $_routes[1] eq '2fa'}class="active"{/if}>
+                                    <a href="{Text::url('saas/2fa')}">SuperAdmin 2FA</a>
+                                </li>
+                                <li {if $_routes[0] eq 'saas' && $_routes[1] eq 'routers'}class="active"{/if}>
+                                    <a href="{Text::url('saas/routers')}">Tenant Router Overview</a>
+                                </li>
+                                <li {if $_routes[0] eq 'saas' && $_routes[1] eq 'payments'}class="active"{/if}>
+                                    <a href="{Text::url('saas/payments')}">Tenant Payment Overview</a>
+                                </li>
+                                <li {if $_routes[0] eq 'saas' && $_routes[1] eq 'health'}class="active"{/if}>
+                                    <a href="{Text::url('saas/health')}">Tenant Health / Status</a>
+                                </li>
+                                <li {if $_routes[0] eq 'saas' && $_routes[1] eq 'audit'}class="active"{/if}>
+                                    <a href="{Text::url('saas/audit')}">SaaS Audit Logs</a>
+                                </li>
+                            </ul>
+                        </li>
+                    {/if}
 
                     <li class="{if ($_routes[0] eq 'customers') || ($_routes[0] eq 'plan' && $_routes[1] eq 'list' && _req('status') eq 'off')}active{/if} treeview">
                         <a href="#">
@@ -224,8 +284,8 @@
                     {/if}
                     {$_MENU_AFTER_PLANS}
 
-                    {if !in_array($_admin['user_type'],['Report'])}
-                        <li class="{if $_routes[0] eq 'paymentgateway' || ($_routes[0] eq 'plugin' && $_routes[1] eq 'pay_setup') || ($_routes[0] eq 'reports' && in_array($_routes[1], ['mpesa-logs','transactions']))}active{/if} treeview">
+                    {if !$isTenantPortal && !in_array($_admin['user_type'],['Report'])}
+                        <li class="{if $_routes[0] eq 'paymentgateway' || $_routes[0] eq 'jovipay' || ($_routes[0] eq 'plugin' && $_routes[1] eq 'pay_setup') || ($_routes[0] eq 'reports' && in_array($_routes[1], ['mpesa-logs','transactions']))}active{/if} treeview">
                             <a href="#">
                                 <i class="fa fa-credit-card"></i> <span>Payments</span>
                                 <span class="pull-right-container"><i class="fa fa-angle-left pull-right"></i></span>
@@ -237,11 +297,17 @@
                                 <li {if $_routes[0] eq 'paymentgateway' && $_routes[1] eq 'mpesastkpush'}class="active"{/if}>
                                     <a href="{Text::url('paymentgateway/mpesastkpush')}">MPESA STK Push</a>
                                 </li>
+                                <li {if $_routes[0] eq 'jovipay' && ($_routes[1] eq 'settings' || $_routes[1] eq '')}class="active"{/if}>
+                                    <a href="{Text::url('jovipay/settings')}">Jovi-Pay Integration</a>
+                                </li>
                                 <li {if $_routes[0] eq 'plugin' && $_routes[1] eq 'pay_setup'}class="active"{/if}>
                                     <a href="{Text::url('plugin/pay_setup')}">Payment Page Settings</a>
                                 </li>
                                 <li {if $_routes[0] eq 'reports' && $_routes[1] eq 'mpesa-logs'}class="active"{/if}>
                                     <a href="{Text::url('reports/mpesa-logs')}">MPESA Logs</a>
+                                </li>
+                                <li {if $_routes[0] eq 'jovipay' && $_routes[1] eq 'transactions'}class="active"{/if}>
+                                    <a href="{Text::url('jovipay/transactions')}">Jovi-Pay Transactions</a>
                                 </li>
                                 <li {if $_routes[0] eq 'reports' && $_routes[1] eq 'transactions'}class="active"{/if}>
                                     <a href="{Text::url('reports/transactions')}">Transactions</a>
@@ -312,7 +378,7 @@
                             <li {if $_routes[0] eq 'message' && $_routes[1] eq 'send_bulk'}class="active"{/if}>
                                 <a href="{Text::url('message/send_bulk')}">Bulk SMS</a>
                             </li>
-                            {if in_array($_admin['user_type'],['SuperAdmin','Admin'])}
+                            {if !$isTenantPortal && in_array($_admin['user_type'],['SuperAdmin','Admin'])}
                                 <li {if $_routes[0] eq 'plugin' && $_routes[1] eq 'talksasa'}class="active"{/if}>
                                     <a href="{Text::url('plugin/talksasa')}">TALKSASA SMS</a>
                                 </li>
@@ -320,7 +386,7 @@
                             <li {if $_routes[0] eq 'logs' && $_routes[1] eq 'message'}class="active"{/if}>
                                 <a href="{Text::url('logs/message')}">Message Logs</a>
                             </li>
-                            {if in_array($_admin['user_type'],['SuperAdmin','Admin'])}
+                            {if !$isTenantPortal && in_array($_admin['user_type'],['SuperAdmin','Admin'])}
                                 <li {if $_routes[0] eq 'settings' && $_routes[1] eq 'notifications'}class="active"{/if}>
                                     <a href="{Text::url('settings/notifications')}">User Notifications</a>
                                 </li>
@@ -358,7 +424,7 @@
                     {/if}
                     {$_MENU_AFTER_REPORTS}
 
-                    {if in_array($_admin['user_type'],['SuperAdmin','Admin'])}
+                    {if !$isTenantPortal && in_array($_admin['user_type'],['SuperAdmin','Admin'])}
                     <li class="{if ($_routes[0] eq 'plugin' && in_array($_routes[1], ['speedtest','system_info'])) || in_array($_routes[0], ['maps','pages','widgets'])}active{/if} treeview">
                         <a href="#">
                             <i class="fa fa-wrench"></i> <span>Tools</span>
@@ -387,7 +453,7 @@
                     {$_MENU_MAPS}
                     {$_MENU_PAGES}
 
-                    {if in_array($_admin['user_type'],['SuperAdmin','Admin'])}
+                    {if !$isTenantPortal && in_array($_admin['user_type'],['SuperAdmin','Admin'])}
                         <li class="{if $_routes[0] eq 'pluginmanager'}active{/if} treeview">
                             <a href="#">
                                 <i class="glyphicon glyphicon-tasks"></i> <span>Plugins</span>
@@ -407,7 +473,10 @@
                             <span class="pull-right-container"><i class="fa fa-angle-left pull-right"></i></span>
                         </a>
                         <ul class="treeview-menu">
-                            {if in_array($_admin['user_type'],['SuperAdmin','Admin'])}
+                            {if $isTenantPortal}
+                                <li {if $_routes[1] eq 'tenant'}class="active"{/if}><a href="{Text::url('settings/tenant')}">Tenant Settings</a></li>
+                            {/if}
+                            {if !$isTenantPortal && in_array($_admin['user_type'],['SuperAdmin','Admin'])}
                                 <li {if $_routes[1] eq 'app'}class="active"{/if}><a href="{Text::url('settings/app')}">{Lang::T('General Settings')}</a></li>
                                 <li {if $_routes[1] eq 'localisation'}class="active"{/if}><a href="{Text::url('settings/localisation')}">{Lang::T('Localisation')}</a></li>
                                 <li {if $_routes[0] eq 'customfield'}class="active"{/if}><a href="{Text::url('customfield')}">{Lang::T('Custom Fields')}</a></li>
@@ -418,29 +487,32 @@
                             {if in_array($_admin['user_type'],['SuperAdmin','Admin','Agent'])}
                                 <li {if $_routes[1] eq 'users'}class="active"{/if}><a href="{Text::url('settings/users')}">{Lang::T('Administrator Users')}</a></li>
                             {/if}
-                            {if in_array($_admin['user_type'],['SuperAdmin','Admin'])}
+                            {if !$isTenantPortal && in_array($_admin['user_type'],['SuperAdmin','Admin'])}
                                 <li {if $_routes[1] eq 'dbstatus'}class="active"{/if}><a href="{Text::url('settings/dbstatus')}">{Lang::T('Backup/Restore')}</a></li>
                             {/if}
                         </ul>
                     </li>
 
                     {if in_array($_admin['user_type'],['SuperAdmin','Admin'])}
-                        <li class="{if $_routes[0] eq 'logs' && $_routes[1] neq 'message'}active{/if} treeview">
+                            <li class="{if ($_routes[0] eq 'logs' && $_routes[1] neq 'message') || $_routes[0] eq 'expiry'}active{/if} treeview">
                             <a href="#">
                                 <i class="ion ion-clock"></i> <span>System / Logs</span>
                                 <span class="pull-right-container"><i class="fa fa-angle-left pull-right"></i></span>
                             </a>
                             <ul class="treeview-menu">
-                                <li {if $_routes[0] eq 'logs' && ($_routes[1] eq '' || $_routes[1] eq 'list') && _req('q') eq ''}class="active"{/if}><a href="{Text::url('logs/list')}">FASTNETPAY Logs</a></li>
-                                <li {if $_routes[0] eq 'logs' && $_routes[1] eq 'list' && _req('q') eq 'error'}class="active"{/if}><a href="{Text::url('logs/list&q=error')}">Error Logs</a></li>
-                                <li {if $_routes[0] eq 'logs' && $_routes[1] eq 'list' && _req('q') eq 'security'}class="active"{/if}><a href="{Text::url('logs/list&q=security')}">Security Logs</a></li>
-                                {$_MENU_LOGS}
+                                    <li {if $_routes[0] eq 'logs' && ($_routes[1] eq '' || $_routes[1] eq 'list') && _req('q') eq ''}class="active"{/if}><a href="{Text::url('logs/list')}">FASTNETPAY Logs</a></li>
+                                    <li {if $_routes[0] eq 'logs' && $_routes[1] eq 'list' && _req('q') eq 'error'}class="active"{/if}><a href="{Text::url('logs/list&q=error')}">Error Logs</a></li>
+                                    <li {if $_routes[0] eq 'logs' && $_routes[1] eq 'list' && _req('q') eq 'security'}class="active"{/if}><a href="{Text::url('logs/list&q=security')}">Security Logs</a></li>
+                                    {if !$isTenantPortal}
+                                        <li {if $_routes[0] eq 'expiry'}class="active"{/if}><a href="{Text::url('expiry/status')}">Expiry Worker</a></li>
+                                    {/if}
+                                    {$_MENU_LOGS}
                             </ul>
                         </li>
                     {/if}
                     {$_MENU_AFTER_LOGS}
 
-                    {if in_array($_admin['user_type'],['SuperAdmin','Admin'])}
+                    {if !$isTenantPortal && in_array($_admin['user_type'],['SuperAdmin','Admin'])}
                         <li {if $_routes[0] eq 'settings' && $_routes[1] eq 'docs'}class="active"{/if}>
                             <a href="{if $_c['docs_clicked'] != 'yes'}{Text::url('settings/docs')}{else}{$app_url}/docs{/if}">
                                 <i class="ion ion-ios-bookmarks"></i>

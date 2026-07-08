@@ -185,6 +185,19 @@ CSS/JS assets are loaded from the same portal DNS name, while package/payment/vo
 
 The wizard also runs a direct RouterOS API reconciliation after applying scripts. This verifies and repairs critical objects such as `fastnetpay-dhcp`, `fastnetpay-hotspot-profile`, `fastnetpay-hotspot`, `fastnetpay-pppoe`, package profiles, and `wlan1` bridge membership. RouterOS v6 returns some script/API errors as `!trap` responses instead of PHP exceptions, so FASTNETPAY now checks those responses explicitly.
 
+## Bandwidth Enforcement
+
+FASTNETPAY package speeds are enforced by MikroTik Hotspot/PPPoE profiles and the dynamic simple queues RouterOS creates for active users. If RouterOS FastTrack is left above customer traffic, those queues can be bypassed and clients may see full uplink speed.
+
+The provisioning wizard now creates two firewall rules before any active `fasttrack-connection` rule:
+
+```text
+FASTNETPAY hotspot queue guard upload
+FASTNETPAY hotspot queue guard download
+```
+
+These rules keep `fastnetpay-bridge` Hotspot traffic out of FastTrack while preserving FastTrack for unrelated traffic. The Final Test screen includes `Bandwidth queue guard`; it should show success before production use.
+
 ## Management Interface
 
 The wizard defaults the management interface to `ether4` (`Port4`). Detection fills the interface picker with live MikroTik interfaces, so you can select a different management port if needed.
@@ -229,3 +242,20 @@ read,write,policy,test,api,sensitive
 ```
 
 The wizard also restricts RouterOS API/API-SSL service access to the configured FASTNETPAY Server IP. In production this should be a VPN IP, not a public internet address.
+
+## 2026 Enhancements
+
+- The wizard now labels the management port as safe admin access only and defaults it to `ether4`.
+- Management port settings can bind one trusted MAC/IP and warn when more than one device is detected.
+- Connection modes now include Local, WireGuard VPN, and SSTP VPN.
+- Router records include future-ready tenant/site/router-group fields without changing current single-tenant behavior.
+- Provisioning writes audit rows to `router_management_audit_logs`.
+- Preview output redacts sensitive passwords before sending scripts to the browser.
+
+Recommended beginner setup:
+
+1. Use `ether1` as WAN.
+2. Use `ether4` as management.
+3. Use `fastnetpay-bridge` for Hotspot and PPPoE client traffic.
+4. Keep Local mode while testing in the same LAN.
+5. Move to WireGuard or SSTP when the router is managed from a VPS/cloud FASTNETPAY server.

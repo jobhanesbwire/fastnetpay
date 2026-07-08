@@ -32,9 +32,13 @@ switch ($action) {
         RouterProvisioning::installSchema();
         $id = (int) ($routes['2'] ?? 0);
         if ($id <= 0 && $_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['draft'] ?? '') !== '1') {
-            $firstRouter = ORM::for_table('tbl_routers')->where('enabled', 1)->order_by_asc('id')->find_one();
+            $firstRouterQuery = ORM::for_table('tbl_routers')->where('enabled', 1)->order_by_asc('id');
+            $firstRouterQuery = Tenant::scopeIfTenant($firstRouterQuery);
+            $firstRouter = $firstRouterQuery->find_one();
             if (!$firstRouter) {
-                $firstRouter = ORM::for_table('tbl_routers')->order_by_asc('id')->find_one();
+                $firstRouterQuery = ORM::for_table('tbl_routers')->order_by_asc('id');
+                $firstRouterQuery = Tenant::scopeIfTenant($firstRouterQuery);
+                $firstRouter = $firstRouterQuery->find_one();
             }
             if ($firstRouter) {
                 r2(getUrl('routers/provision/' . $firstRouter['id']));
@@ -45,7 +49,9 @@ switch ($action) {
         $ui->assign('_title', 'Router Provisioning Wizard');
         $ui->assign('router', $router);
         $ui->assign('router_id', $router ? (int) $router['id'] : 0);
-        $ui->assign('routers', ORM::for_table('tbl_routers')->order_by_asc('name')->find_many());
+        $routerListQuery = ORM::for_table('tbl_routers')->order_by_asc('name');
+        $routerListQuery = Tenant::scopeIfTenant($routerListQuery);
+        $ui->assign('routers', $routerListQuery->find_many());
         $ui->assign('templates', RouterProvisioning::templates());
         $ui->assign('plans', RouterProvisioning::plans());
         $ui->assign('settings', $settings);
@@ -82,7 +88,7 @@ switch ($action) {
         try {
             $router = RouterProvisioning::router($id);
             $settings = RouterProvisioning::settingsFromRequest($router);
-            $preview = RouterProvisioning::buildProvisioningScript($router, $settings, RouterProvisioning::plans(), RouterProvisioning::mpesaReadiness());
+	            $preview = RouterProvisioning::buildProvisioningScript($router, $settings, RouterProvisioning::plans(), RouterProvisioning::mpesaReadiness(), true);
             RouterProvisioning::json(['ok' => true] + $preview);
         } catch (Throwable $e) {
             RouterProvisioning::json(['ok' => false, 'message' => $e->getMessage()], 400);
@@ -123,6 +129,23 @@ switch ($action) {
         }
         break;
 
+    case 'provision-refresh-portal':
+        $id = (int) ($routes['2'] ?? 0);
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            r2(getUrl('routers/provision/' . $id));
+        }
+        if (!Csrf::check(_post('csrf_token'))) {
+            RouterProvisioning::json(['ok' => false, 'message' => 'Invalid CSRF token. Please refresh and try again.'], 403);
+        }
+        try {
+            $router = RouterProvisioning::router($id);
+            $settings = RouterProvisioning::settingsFromRequest($router);
+            RouterProvisioning::json(RouterProvisioning::refreshPortalFilesOnly($router, $settings, $admin));
+        } catch (Throwable $e) {
+            RouterProvisioning::json(['ok' => false, 'message' => $e->getMessage()], 500);
+        }
+        break;
+
     case 'provision-logs':
         RouterProvisioning::installSchema();
         $id = (int) ($routes['2'] ?? 0);
@@ -144,9 +167,11 @@ switch ($action) {
 
     case 'edit':
         $id  = $routes['2'];
-        $d = ORM::for_table('tbl_routers')->find_one($id);
+        $d = Tenant::scopeIfTenant(ORM::for_table('tbl_routers'))->find_one($id);
         if (!$d) {
-            $d = ORM::for_table('tbl_routers')->where_equal('name', _get('name'))->find_one();
+            $fallbackQuery = ORM::for_table('tbl_routers')->where_equal('name', _get('name'));
+            $fallbackQuery = Tenant::scopeIfTenant($fallbackQuery);
+            $d = $fallbackQuery->find_one();
         }
         $ui->assign('xheader', $leafletpickerHeader);
         if ($d) {
@@ -161,7 +186,7 @@ switch ($action) {
     case 'delete':
         $id  = $routes['2'];
         run_hook('router_delete'); #HOOK
-        $d = ORM::for_table('tbl_routers')->find_one($id);
+        $d = Tenant::scopeIfTenant(ORM::for_table('tbl_routers'))->find_one($id);
         if ($d) {
             $d->delete();
             r2(getUrl('routers/list'), 's', Lang::T('Data Deleted Successfully'));
@@ -185,7 +210,9 @@ switch ($action) {
                 $msg .= Lang::T('All field is required') . '<br>';
             }
 
-            $d = ORM::for_table('tbl_routers')->where('ip_address', $ip_address)->find_one();
+            $routerIpQuery = ORM::for_table('tbl_routers')->where('ip_address', $ip_address);
+            $routerIpQuery = Tenant::scopeIfTenant($routerIpQuery);
+            $d = $routerIpQuery->find_one();
             if ($d) {
                 $msg .= Lang::T('IP Router Already Exist') . '<br>';
             }
@@ -200,6 +227,7 @@ switch ($action) {
                 (new MikrotikHotspot())->getClient($ip_address, $username, $password);
             }
             $d = ORM::for_table('tbl_routers')->create();
+            Tenant::stamp($d, null, 'tbl_routers');
             $d->name = $name;
             $d->ip_address = $ip_address;
             $d->username = $username;
@@ -235,14 +263,16 @@ switch ($action) {
         }
 
         $id = _post('id');
-        $d = ORM::for_table('tbl_routers')->find_one($id);
+        $d = Tenant::scopeIfTenant(ORM::for_table('tbl_routers'))->find_one($id);
         if ($d) {
         } else {
             $msg .= Lang::T('Data Not Found') . '<br>';
         }
 
         if ($d['name'] != $name) {
-            $c = ORM::for_table('tbl_routers')->where('name', $name)->where_not_equal('id', $id)->find_one();
+            $routerNameQuery = ORM::for_table('tbl_routers')->where('name', $name)->where_not_equal('id', $id);
+            $routerNameQuery = Tenant::scopeIfTenant($routerNameQuery);
+            $c = $routerNameQuery->find_one();
             if ($c) {
                 $msg .= 'Name Already Exists<br>';
             }
@@ -251,7 +281,9 @@ switch ($action) {
 
         if($enabled || _post("testIt")){
             if ($d['ip_address'] != $ip_address) {
-                $c = ORM::for_table('tbl_routers')->where('ip_address', $ip_address)->where_not_equal('id', $id)->find_one();
+                $routerIpQuery = ORM::for_table('tbl_routers')->where('ip_address', $ip_address)->where_not_equal('id', $id);
+                $routerIpQuery = Tenant::scopeIfTenant($routerIpQuery);
+                $c = $routerIpQuery->find_one();
                 if ($c) {
                     $msg .= 'IP Already Exists<br>';
                 }
@@ -277,22 +309,22 @@ switch ($action) {
             $d->enabled = $enabled;
             $d->save();
             if ($name != $oldname) {
-                $p = ORM::for_table('tbl_plans')->where('routers', $oldname)->find_result_set();
+                $p = Tenant::scopeIfTenant(ORM::for_table('tbl_plans')->where('routers', $oldname))->find_result_set();
                 $p->set('routers', $name);
                 $p->save();
-                $p = ORM::for_table('tbl_payment_gateway')->where('routers', $oldname)->find_result_set();
+                $p = Tenant::scopeIfTenant(ORM::for_table('tbl_payment_gateway')->where('routers', $oldname))->find_result_set();
                 $p->set('routers', $name);
                 $p->save();
-                $p = ORM::for_table('tbl_pool')->where('routers', $oldname)->find_result_set();
+                $p = Tenant::scopeIfTenant(ORM::for_table('tbl_pool')->where('routers', $oldname))->find_result_set();
                 $p->set('routers', $name);
                 $p->save();
-                $p = ORM::for_table('tbl_transactions')->where('routers', $oldname)->find_result_set();
+                $p = Tenant::scopeIfTenant(ORM::for_table('tbl_transactions')->where('routers', $oldname))->find_result_set();
                 $p->set('routers', $name);
                 $p->save();
-                $p = ORM::for_table('tbl_user_recharges')->where('routers', $oldname)->find_result_set();
+                $p = Tenant::scopeIfTenant(ORM::for_table('tbl_user_recharges')->where('routers', $oldname))->find_result_set();
                 $p->set('routers', $name);
                 $p->save();
-                $p = ORM::for_table('tbl_voucher')->where('routers', $oldname)->find_result_set();
+                $p = Tenant::scopeIfTenant(ORM::for_table('tbl_voucher')->where('routers', $oldname))->find_result_set();
                 $p->set('routers', $name);
                 $p->save();
             }
@@ -307,6 +339,7 @@ switch ($action) {
         $name = _post('name');
         $name = _post('name');
         $query = ORM::for_table('tbl_routers')->order_by_desc('id');
+        $query = Tenant::scopeIfTenant($query);
         if ($name != '') {
             $query->where_like('name', '%' . $name . '%');
         }

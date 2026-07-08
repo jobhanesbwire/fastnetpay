@@ -31,7 +31,11 @@ switch ($do) {
         }
         run_hook('customer_login'); #HOOK
         if ($username != '' and $password != '') {
-            $d = ORM::for_table('tbl_customers')->where('username', $username)->find_one();
+            $query = ORM::for_table('tbl_customers')->where('username', $username);
+            if (class_exists('Tenant')) {
+                Tenant::scopeIfTenant($query);
+            }
+            $d = $query->find_one();
             if ($d) {
                 $d_pass = $d['password'];
                 if ($d['status'] == 'Banned') {

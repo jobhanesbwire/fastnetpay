@@ -24,6 +24,7 @@ switch ($action) {
         $query = ORM::for_table('tbl_payment_gateway')->order_by_desc("id");
         $query->selects('id', 'username', 'gateway', 'gateway_trx_id', 'plan_id', 'plan_name', 'routers_id', 'routers', 'price', 'pg_url_payment', 'payment_method', 'payment_channel', 'expired_date', 'created_date', 'paid_date', 'trx_invoice', 'status');
         $query->where('gateway', $pg);
+        $query = Tenant::scopeIfTenant($query);
         if (!empty($q)) {
             $query->whereRaw("(gateway_trx_id LIKE '%$q%' OR username LIKE '%$q%' OR routers LIKE '%$q%' OR plan_name LIKE '%$q%')");
             $append_url = 'q=' . urlencode($q);
@@ -38,7 +39,7 @@ switch ($action) {
         break;
     case 'auditview':
         $pg = alphanumeric($routes[2]);
-        $d = ORM::for_table('tbl_payment_gateway')->find_one($pg);
+        $d = Tenant::scopeIfTenant(ORM::for_table('tbl_payment_gateway'))->find_one($pg);
         $d['pg_request'] = (!empty($d['pg_request']))? Text::jsonArray21Array(json_decode($d['pg_request'], true)) : [];
         $d['pg_paid_response'] = (!empty($d['pg_paid_response']))? Text::jsonArray21Array(json_decode($d['pg_paid_response'], true)) : [];
         $ui->assign('_title', 'Payment Gateway Audit View');
@@ -51,15 +52,20 @@ switch ($action) {
             if (is_array($_POST['pgs'])) {
                 $pgs = implode(',', $_POST['pgs']);
             }
-            $d = ORM::for_table('tbl_appconfig')->where('setting', 'payment_gateway')->find_one();
-            if ($d) {
-                $d->value = $pgs;
-                $d->save();
+            if (Tenant::isTenantRequest()) {
+                Tenant::saveSetting('payment', 'active_gateways', $pgs, false);
+                Tenant::audit('tenant.payment_gateways_changed', 'Tenant active payment gateways changed', 'payment_gateway', 'active', Tenant::currentId(), (int) $admin['id'], ['gateways' => $pgs]);
             } else {
-                $d = ORM::for_table('tbl_appconfig')->create();
-                $d->setting = 'payment_gateway';
-                $d->value = $pgs;
-                $d->save();
+                $d = ORM::for_table('tbl_appconfig')->where('setting', 'payment_gateway')->find_one();
+                if ($d) {
+                    $d->value = $pgs;
+                    $d->save();
+                } else {
+                    $d = ORM::for_table('tbl_appconfig')->create();
+                    $d->setting = 'payment_gateway';
+                    $d->value = $pgs;
+                    $d->save();
+                }
             }
             r2(getUrl('paymentgateway'), 's', Lang::T('Payment Gateway saved successfully'));
         }
@@ -91,7 +97,10 @@ switch ($action) {
                 }
                 $ui->assign('_title', 'Payment Gateway Settings');
                 $ui->assign('pgs', $pgs);
-                $ui->assign('actives', explode(',', $config['payment_gateway']));
+                $activeGateways = Tenant::isTenantRequest()
+                    ? Tenant::setting('payment', 'active_gateways', $config['payment_gateway'] ?? '')
+                    : ($config['payment_gateway'] ?? '');
+                $ui->assign('actives', explode(',', $activeGateways));
                 $ui->display('admin/paymentgateway/list.tpl');
             }
         }

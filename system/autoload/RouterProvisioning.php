@@ -89,8 +89,53 @@ class RouterProvisioning
             INDEX created_at_idx (created_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
+        ORM::raw_execute("CREATE TABLE IF NOT EXISTS router_management_audit_logs (
+            id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            router_id INT UNSIGNED NULL,
+            admin_id INT UNSIGNED NULL,
+            action VARCHAR(120) NOT NULL,
+            summary TEXT NULL,
+            created_at DATETIME NOT NULL,
+            INDEX router_id_idx (router_id),
+            INDEX created_at_idx (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        self::ensureColumn('tbl_routers', 'tenant_id', 'INT UNSIGNED NULL');
+        self::ensureColumn('tbl_routers', 'site_id', 'INT UNSIGNED NULL');
+        self::ensureColumn('tbl_routers', 'router_group', 'VARCHAR(120) NULL');
+        self::ensureColumn('tbl_routers', 'management_url', 'VARCHAR(255) NULL');
+        self::ensureColumn('tbl_routers', 'management_port', 'VARCHAR(80) NULL');
+        self::ensureColumn('tbl_routers', 'management_mac', 'VARCHAR(32) NULL');
+        self::ensureColumn('tbl_routers', 'management_ip', 'VARCHAR(45) NULL');
+        self::ensureColumn('tbl_routers', 'vpn_mode', "VARCHAR(32) NOT NULL DEFAULT 'local'");
+        self::ensureColumn('tbl_routers', 'vpn_ip', 'VARCHAR(45) NULL');
+        self::ensureColumn('tbl_routers', 'vpn_status', 'VARCHAR(32) NULL');
+        self::ensureColumn('tbl_routers', 'vpn_last_seen', 'DATETIME NULL');
+        self::ensureColumn('tbl_routers', 'api_restrict_mode', "VARCHAR(32) NOT NULL DEFAULT 'local'");
+        self::ensureColumn('router_port_mappings', 'management_ip', 'VARCHAR(45) NULL');
+        self::ensureColumn('router_port_mappings', 'management_allowed_mac', 'VARCHAR(32) NULL');
+        self::ensureColumn('router_port_mappings', 'connection_mode', "VARCHAR(32) NOT NULL DEFAULT 'local'");
+        self::ensureColumn('router_port_mappings', 'vpn_ip', 'VARCHAR(45) NULL');
+
         self::seedTemplates();
         self::seedSamplePackages();
+    }
+
+    private static function ensureColumn($table, $column, $definition)
+    {
+        try {
+            $table = preg_replace('/[^a-zA-Z0-9_]/', '', (string) $table);
+            $column = preg_replace('/[^a-zA-Z0-9_]/', '', (string) $column);
+            if ($table === '' || $column === '') {
+                return;
+            }
+            $exists = ORM::for_table($table)->raw_query("SHOW COLUMNS FROM `$table` LIKE ?", [$column])->find_one();
+            if (!$exists) {
+                ORM::raw_execute("ALTER TABLE `$table` ADD COLUMN `$column` $definition");
+            }
+        } catch (Throwable $e) {
+            _log('FASTNETPAY schema check failed for ' . $table . '.' . $column . ': ' . $e->getMessage());
+        }
     }
 
     public static function seedTemplates()
@@ -195,9 +240,12 @@ class RouterProvisioning
 
     public static function seedSamplePackages()
     {
-        $hasAccessPlan = (int) ORM::for_table('tbl_plans')
-            ->where_in('type', ['Hotspot', 'PPPOE'])
-            ->count();
+        $planQuery = ORM::for_table('tbl_plans')
+            ->where_in('type', ['Hotspot', 'PPPOE']);
+        if (class_exists('Tenant')) {
+            $planQuery = Tenant::scopeQuery($planQuery, 'tbl_plans');
+        }
+        $hasAccessPlan = (int) $planQuery->count();
         if ($hasAccessPlan > 0) {
             return;
         }
@@ -230,9 +278,16 @@ class RouterProvisioning
 
     private static function ensureBandwidth($name, $down, $downUnit, $up, $upUnit)
     {
-        $row = ORM::for_table('tbl_bandwidth')->where('name_bw', $name)->find_one();
+        $query = ORM::for_table('tbl_bandwidth')->where('name_bw', $name);
+        if (class_exists('Tenant')) {
+            $query = Tenant::scopeQuery($query);
+        }
+        $row = $query->find_one();
         if (!$row) {
             $row = ORM::for_table('tbl_bandwidth')->create();
+            if (class_exists('Tenant')) {
+                Tenant::stamp($row, null, 'tbl_bandwidth');
+            }
             $row->name_bw = $name;
             $row->burst = '';
         }
@@ -247,12 +302,19 @@ class RouterProvisioning
 
     private static function ensurePlan($data)
     {
-        $row = ORM::for_table('tbl_plans')->where('name_plan', $data['name_plan'])->find_one();
+        $query = ORM::for_table('tbl_plans')->where('name_plan', $data['name_plan']);
+        if (class_exists('Tenant')) {
+            $query = Tenant::scopeQuery($query);
+        }
+        $row = $query->find_one();
         if ($row) {
             return;
         }
 
         $row = ORM::for_table('tbl_plans')->create();
+        if (class_exists('Tenant')) {
+            Tenant::stamp($row, null, 'tbl_plans');
+        }
         $row->name_plan = $data['name_plan'];
         $row->id_bw = (int) $data['id_bw'];
         $row->price = $data['price'];
@@ -307,6 +369,11 @@ class RouterProvisioning
             'hotspot_interface' => 'fastnetpay-bridge',
             'pppoe_interface' => 'fastnetpay-bridge',
             'management_interface' => 'ether4',
+            'management_ip' => '192.168.88.10',
+            'management_allowed_mac' => '',
+            'management_max_devices' => '1',
+            'management_allow_internet' => 'yes',
+            'management_bind_mac' => 'no',
             'lan_gateway' => '192.168.90.1/24',
             'hotspot_pool' => '192.168.90.50-192.168.90.250',
             'pppoe_pool' => '100.64.10.10-100.64.10.250',
@@ -322,6 +389,20 @@ class RouterProvisioning
             'support_whatsapp' => '',
             'shortcode_label' => self::cfg('mpesastkpush_shortcode', ''),
             'fastnetpay_server_ip' => self::defaultServerAddress(),
+            'connection_mode' => 'local',
+            'vpn_server_ip' => '10.100.0.1',
+            'vpn_router_ip' => '10.100.1.1',
+            'vpn_port' => '51820',
+            'wireguard_public_key' => '',
+            'wireguard_private_key' => '',
+            'sstp_server' => '',
+            'sstp_username' => '',
+            'sstp_password' => '',
+            'secure_management_url' => '',
+            'api_restrict_mode' => 'local',
+            'tenant_id' => '',
+            'site_id' => '',
+            'router_group' => '',
             'radius_secret' => self::randomSecret(),
             'security_level' => 'recommended',
             'custom_walled_garden' => '',
@@ -355,6 +436,20 @@ class RouterProvisioning
                         $defaults[$field] = $mapping[$field];
                     }
                 }
+                foreach (['management_ip', 'management_allowed_mac', 'connection_mode', 'vpn_ip'] as $field) {
+                    if (!empty($mapping[$field])) {
+                        if ($field === 'vpn_ip') {
+                            $defaults['vpn_router_ip'] = $mapping[$field];
+                        } else {
+                            $defaults[$field] = $mapping[$field];
+                        }
+                    }
+                }
+                foreach (['management_url' => 'secure_management_url', 'management_mac' => 'management_allowed_mac', 'management_ip' => 'management_ip', 'vpn_mode' => 'connection_mode', 'vpn_ip' => 'vpn_router_ip', 'api_restrict_mode' => 'api_restrict_mode', 'tenant_id' => 'tenant_id', 'site_id' => 'site_id', 'router_group' => 'router_group'] as $routerField => $settingField) {
+                    if (isset($router[$routerField]) && trim((string) $router[$routerField]) !== '') {
+                        $defaults[$settingField] = $router[$routerField];
+                    }
+                }
             }
         }
 
@@ -372,9 +467,22 @@ class RouterProvisioning
             $clean[$field] = self::normalizeInterfaceName($clean[$field], $field === 'management_interface' ? 'ether4' : '');
         }
         $clean = self::protectManagementDefaults($clean);
+        $clean['management_ip'] = self::ip($clean['management_ip'], '192.168.88.10');
+        $clean['management_allowed_mac'] = self::mac($clean['management_allowed_mac']);
+        $clean['management_max_devices'] = (string) max(1, min(4, (int) $clean['management_max_devices']));
+        $clean['management_allow_internet'] = $clean['management_allow_internet'] === 'no' ? 'no' : 'yes';
+        $clean['management_bind_mac'] = $clean['management_bind_mac'] === 'yes' ? 'yes' : 'no';
         $clean['deployment_profile'] = self::choice($clean['deployment_profile'], ['hotspot', 'pppoe', 'mixed', 'base', 'security'], 'mixed');
         $clean['portal_mode'] = self::choice($clean['portal_mode'], ['fastnetpay', 'static'], 'fastnetpay');
         $clean['security_level'] = self::choice($clean['security_level'], ['basic', 'recommended', 'strict'], 'recommended');
+        $clean['connection_mode'] = self::choice($clean['connection_mode'], ['local', 'wireguard', 'sstp'], 'local');
+        $clean['api_restrict_mode'] = self::choice($clean['api_restrict_mode'], ['local', 'vpn'], $clean['connection_mode'] === 'local' ? 'local' : 'vpn');
+        $clean['vpn_server_ip'] = self::ip($clean['vpn_server_ip'], '10.100.0.1');
+        $clean['vpn_router_ip'] = self::ip($clean['vpn_router_ip'], '10.100.1.1');
+        $clean['vpn_port'] = (string) self::port($clean['vpn_port'], 51820);
+        $clean['secure_management_url'] = self::cleanUrl($clean['secure_management_url']);
+        $clean['tenant_id'] = (string) max(0, (int) $clean['tenant_id']);
+        $clean['site_id'] = (string) max(0, (int) $clean['site_id']);
         $clean['create_sample_user'] = $clean['create_sample_user'] === 'yes' ? 'yes' : 'no';
         $clean['allow_backup_override'] = $clean['allow_backup_override'] === 'yes' ? 'yes' : 'no';
         $clean['plan_ids'] = self::intArray($_POST['plan_ids'] ?? []);
@@ -409,14 +517,18 @@ class RouterProvisioning
         if ($id <= 0) {
             return null;
         }
-        return ORM::for_table('tbl_routers')->find_one($id);
+        $query = ORM::for_table('tbl_routers');
+        if (class_exists('Tenant')) {
+            $query = Tenant::scopeIfTenant($query);
+        }
+        return $query->find_one($id);
     }
 
     public static function plans()
     {
         self::seedSamplePackages();
 
-        return ORM::for_table('tbl_plans')
+        $query = ORM::for_table('tbl_plans')
             ->select('tbl_plans.id', 'id')
             ->select('tbl_plans.name_plan', 'name_plan')
             ->select('tbl_plans.type', 'type')
@@ -435,7 +547,11 @@ class RouterProvisioning
             ->select('tbl_bandwidth.rate_down_unit', 'rate_down_unit')
             ->select('tbl_bandwidth.burst', 'burst')
             ->left_outer_join('tbl_bandwidth', ['tbl_plans.id_bw', '=', 'tbl_bandwidth.id'])
-            ->where_in('tbl_plans.type', ['Hotspot', 'PPPOE'])
+            ->where_in('tbl_plans.type', ['Hotspot', 'PPPOE']);
+        if (class_exists('Tenant')) {
+            $query = Tenant::scopeIfTenant($query, 'tbl_plans');
+        }
+        return $query
             ->order_by_asc('tbl_plans.type')
             ->order_by_asc('tbl_plans.name_plan')
             ->find_array();
@@ -537,7 +653,7 @@ class RouterProvisioning
         ];
     }
 
-    public static function buildProvisioningScript($router, $settings, $plans = null, $payment = null)
+    public static function buildProvisioningScript($router, $settings, $plans = null, $payment = null, $redactSensitive = false)
     {
         $plans = $plans === null ? self::plans() : $plans;
         $payment = $payment === null ? self::mpesaReadiness() : $payment;
@@ -556,6 +672,14 @@ class RouterProvisioning
             'name' => 'Base ISP Setup',
             'commands' => self::buildBaseIspScript($router, $settings),
         ];
+
+        if (($settings['connection_mode'] ?? 'local') !== 'local') {
+            $sections[] = [
+                'key' => 'vpn',
+                'name' => 'VPN Remote Management',
+                'commands' => self::buildVpnScript($settings),
+            ];
+        }
 
         if (in_array($settings['deployment_profile'], ['hotspot', 'mixed'], true)) {
             $sections[] = [
@@ -614,23 +738,33 @@ class RouterProvisioning
             $script[] = '';
         }
 
-        return [
-            'sections' => $sections,
-            'warnings' => array_values(array_unique(array_filter($warnings))),
-            'script' => trim(implode("\n", $script)) . "\n",
-            'selected_plans' => $selectedPlans,
-        ];
-    }
+            $publicSections = $sections;
+            if ($redactSensitive) {
+                foreach ($publicSections as &$section) {
+                    $section['commands'] = array_map([self::class, 'redact'], $section['commands']);
+                }
+                unset($section);
+            }
+
+            return [
+                'sections' => $publicSections,
+                'warnings' => array_values(array_unique(array_filter($warnings))),
+                'script' => ($redactSensitive ? self::redact(trim(implode("\n", $script))) : trim(implode("\n", $script))) . "\n",
+                'selected_plans' => $selectedPlans,
+            ];
+        }
 
     public static function runProvisioning($router, $settings, $admin)
     {
         self::installSchema();
         if (!$router) {
             throw new Exception('Save the router first, then run automatic provisioning from the router list or edit page.');
-        }
+            }
 
-        self::savePortMapping((int) $router['id'], $settings);
-        $preview = self::buildProvisioningScript($router, $settings, self::plans(), self::mpesaReadiness());
+            self::savePortMapping((int) $router['id'], $settings);
+            self::saveRouterProvisioningSettings($router, $settings);
+            self::auditRouterAction((int) $router['id'], (int) ($admin['id'] ?? 0), 'provisioning-started', 'Deployment ' . $settings['deployment_profile'] . ', connection mode ' . $settings['connection_mode']);
+            $preview = self::buildProvisioningScript($router, $settings, self::plans(), self::mpesaReadiness());
         $detect = ['version' => 'unknown'];
         try {
             $detect = self::detect($router, $settings);
@@ -639,6 +773,9 @@ class RouterProvisioning
         }
 
         $run = ORM::for_table('router_provisioning_runs')->create();
+        if (class_exists('Tenant')) {
+            Tenant::stamp($run, Tenant::rowTenantId($router), 'router_provisioning_runs');
+        }
         $run->router_id = (int) $router['id'];
         $run->deployment_profile = $settings['deployment_profile'];
         $run->routeros_version = $detect['version'] ?? '';
@@ -761,9 +898,10 @@ class RouterProvisioning
             $final = null;
         }
 
-        $run->status = $failed ? 'failed' : 'completed';
-        $run->completed_at = date('Y-m-d H:i:s');
-        $run->save();
+            $run->status = $failed ? 'failed' : 'completed';
+            $run->completed_at = date('Y-m-d H:i:s');
+            $run->save();
+            self::auditRouterAction((int) $router['id'], (int) ($admin['id'] ?? 0), $failed ? 'provisioning-failed' : 'provisioning-completed', 'Run #' . $runId . ' finished with status ' . $run->status);
 
         return [
             'ok' => !$failed,
@@ -814,17 +952,31 @@ class RouterProvisioning
         $dnsStatic = self::safeRows($client, '/ip/dns/static/print');
         $pppoeServers = self::safeRows($client, '/interface/pppoe-server/server/print');
         $natRules = self::safeRows($client, '/ip/firewall/nat/print');
+        $filterRules = self::safeRows($client, '/ip/firewall/filter/print');
         $walledGarden = self::safeRows($client, '/ip/hotspot/walled-garden/print');
         $walledGardenIp = self::safeRows($client, '/ip/hotspot/walled-garden/ip/print');
-        $files = self::safeRows($client, '/file/print');
-        $wireless = self::safeRows($client, '/interface/wireless/print');
-        $wifi = self::safeRows($client, '/interface/wifi/print');
+            $files = self::safeRows($client, '/file/print');
+            $wireless = self::safeRows($client, '/interface/wireless/print');
+            $wifi = self::safeRows($client, '/interface/wifi/print');
+            $services = self::safeRows($client, '/ip/service/print');
+            $bridgeHosts = self::safeRows($client, '/interface/bridge/host/print');
+            $managementInterface = self::rosName($settings['management_interface'] ?? 'ether4');
+            $connectionMode = self::choice($settings['connection_mode'] ?? 'local', ['local', 'wireguard', 'sstp'], 'local');
 
-        $items = [];
-        $items[] = self::finalItem('api', 'RouterOS API connection', 'success', self::prop($resource, 'version', 'unknown'), 'Connected and read live router resources.');
-        $items[] = self::finalItem('routeros', 'RouterOS version', 'success', self::prop($resource, 'version', 'unknown'), 'Board: ' . self::prop($resource, 'board-name', 'unknown'));
+            $items = [];
+            $items[] = self::finalItem('api', 'RouterOS API connection', 'success', self::prop($resource, 'version', 'unknown'), 'Connected and read live router resources.');
+            $items[] = self::finalItem('routeros', 'RouterOS version', 'success', self::prop($resource, 'version', 'unknown'), 'Board: ' . self::prop($resource, 'board-name', 'unknown'));
+            $managementHosts = self::rowsBy($bridgeHosts, 'on-interface', $managementInterface);
+            $managementStatus = count($managementHosts) > 1 ? 'warning' : 'success';
+            $items[] = self::finalItem('management_port', 'Management port', self::findRowBy($interfaces, 'name', $managementInterface) ? $managementStatus : 'warning', $managementInterface, count($managementHosts) > 1 ? 'More than one device is visible on the management port. Bind the trusted MAC in the wizard.' : 'Safe admin access port is separated from the customer bridge.');
+            $apiService = self::findRowBy($services, 'name', 'api');
+            $items[] = self::finalItem('api_restriction', 'RouterOS API restriction', $apiService ? 'success' : 'warning', $apiService ? self::prop($apiService, 'address', '0.0.0.0/0') : 'unknown', 'Production should restrict API to FASTNETPAY local/VPN IP only.');
+            if ($connectionMode !== 'local') {
+                $vpnInterface = $connectionMode === 'wireguard' ? 'fastnetpay-wg' : 'fastnetpay-sstp';
+                $items[] = self::finalItem('vpn', strtoupper($connectionMode) . ' management tunnel', self::findRowBy($interfaces, 'name', $vpnInterface) ? 'success' : 'warning', $vpnInterface, 'Remote production routers should be managed through VPN, not public API.');
+            }
 
-        if ($bridge) {
+            if ($bridge) {
             $bridgeRow = self::findRowBy($bridges, 'name', $bridge);
             $ports = self::rowsBy($bridgePorts, 'bridge', $bridge);
             $items[] = self::finalItem('bridge', 'Hotspot bridge', $bridgeRow ? 'success' : 'failed', $bridge, $bridgeRow ? 'Bridge exists on MikroTik.' : 'Bridge is missing. Rerun provisioning to create it.');
@@ -854,6 +1006,7 @@ class RouterProvisioning
             $items[] = self::finalItem('gateway', 'Hotspot gateway IP', self::hasAddress($addresses, $settings['lan_gateway'], $hotspotInterface) ? 'success' : 'warning', $settings['lan_gateway'], 'Gateway should be assigned to the Hotspot bridge/interface.');
             $items[] = self::finalItem('portal_dns', 'Portal DNS trigger', self::findRowBy($dnsStatic, 'name', $dnsName) ? 'success' : 'warning', $dnsName, 'Static DNS uses the portal name as a Hotspot trigger so clients are redirected to MikroTik login files.');
             $items[] = self::finalItem('portal_files', 'MikroTik portal files', $portalFiles['found'] === $portalFiles['total'] ? 'success' : 'failed', $portalFiles['found'] . '/' . $portalFiles['total'], 'Files: ' . implode(', ', $portalFiles['missing']) . ($portalFiles['missing'] ? ' missing' : ' all present'));
+            $items[] = self::finalItem('queue_guard', 'Bandwidth queue guard', self::hasHotspotQueueGuard($filterRules, $hotspotInterface) ? 'success' : 'warning', $hotspotInterface, 'FASTNETPAY must bypass RouterOS FastTrack for hotspot clients so package speeds are enforced.');
             $items[] = self::finalItem('walled_garden', 'Walled garden', count($walledGarden) + count($walledGardenIp) > 0 ? 'success' : 'warning', (string) (count($walledGarden) + count($walledGardenIp)), 'Unpaid users must reach FASTNETPAY portal/payment APIs only.');
         }
 
@@ -919,6 +1072,22 @@ class RouterProvisioning
             }
         }
         return $matches;
+    }
+
+    private static function hasHotspotQueueGuard($rows, $hotspotInterface)
+    {
+        $upload = false;
+        $download = false;
+        foreach ($rows as $row) {
+            $comment = self::prop($row, 'comment');
+            if ($comment === 'FASTNETPAY hotspot queue guard upload' && self::prop($row, 'in-interface') === $hotspotInterface) {
+                $upload = true;
+            }
+            if ($comment === 'FASTNETPAY hotspot queue guard download' && self::prop($row, 'out-interface') === $hotspotInterface) {
+                $download = true;
+            }
+        }
+        return $upload && $download;
     }
 
     private static function rowPropertyList($rows, $property)
@@ -1003,6 +1172,9 @@ class RouterProvisioning
     {
         self::installSchema();
         $query = ORM::for_table('router_provisioning_runs')->order_by_desc('id');
+        if (class_exists('Tenant')) {
+            $query = Tenant::scopeIfTenant($query);
+        }
         if ((int) $routerId > 0) {
             $query->where('router_id', (int) $routerId);
         }
@@ -1011,7 +1183,11 @@ class RouterProvisioning
 
     public static function steps($runId)
     {
-        return ORM::for_table('router_provisioning_steps')->where('run_id', (int) $runId)->order_by_asc('id')->find_many();
+        $query = ORM::for_table('router_provisioning_steps')->where('run_id', (int) $runId);
+        if (class_exists('Tenant')) {
+            $query = Tenant::scopeIfTenant($query);
+        }
+        return $query->order_by_asc('id')->find_many();
     }
 
     public static function stepsByRun($runs)
@@ -1048,7 +1224,9 @@ class RouterProvisioning
 
     private static function buildApiUserPreviewScript($settings)
     {
-        $serverIp = self::ip($settings['fastnetpay_server_ip'], self::defaultServerAddress());
+            $serverIp = (($settings['api_restrict_mode'] ?? 'local') === 'vpn' && ($settings['connection_mode'] ?? 'local') !== 'local')
+                ? self::ip($settings['vpn_server_ip'] ?? '', '10.100.0.1')
+                : self::ip($settings['fastnetpay_server_ip'], self::defaultServerAddress());
         return [
             '# FASTNETPAY verifies or creates RouterOS API user "' . self::API_USERNAME . '" before backup/provisioning.',
             '# Bootstrap/admin credentials are used only for this setup step when the API user does not exist or needs its password reset.',
@@ -1057,6 +1235,26 @@ class RouterProvisioning
             '# RouterOS user: ' . self::API_USERNAME . ' with the password entered in the wizard.',
             '# API services are enabled in PHPNuxBill-compatible mode first; strict IP restrictions are applied only in the Security step after preview.',
             '# Planned FASTNETPAY server IP for strict security mode: ' . $serverIp,
+        ];
+    }
+
+    public static function refreshPortalFilesOnly($router, $settings, $admin = null)
+    {
+        self::installSchema();
+        if (!$router) {
+            throw new Exception('Router not found. Save the router before refreshing portal files.');
+        }
+
+        $connection = self::prepareApiUser($router, $settings, 0, false);
+        $settings = self::withDetectedServerIp($connection['client'], $settings);
+        self::uploadPortalFiles($connection['client'], $router, $settings);
+        self::auditRouterAction((int) $router['id'], (int) ($admin['id'] ?? 0), 'portal-files-refreshed', 'MikroTik hotspot captive portal files refreshed from FASTNETPAY.');
+
+        return [
+            'ok' => true,
+            'message' => 'FASTNETPAY captive portal files were refreshed on MikroTik.',
+            'router_id' => (int) $router['id'],
+            'connection_status' => $connection['status'] ?? 'connected',
         ];
     }
 
@@ -1251,7 +1449,7 @@ class RouterProvisioning
         $dnsServers = self::csvIps($settings['dns_servers'], '1.1.1.1,8.8.8.8');
         $bridge = self::bridgeNameFromSettings($settings);
         $bridgeCommands = $bridge ? self::buildBridgeScript($bridge, $wan, $settings) : [];
-        $managementCommands = self::buildManagementInterfaceScript($management, $bridge, $wan);
+            $managementCommands = self::buildManagementInterfaceScript($management, $bridge, $wan, $settings);
 
         return array_values(array_filter(array_merge([
             '# FASTNETPAY base identity, DNS, interface lists, and NAT.',
@@ -1324,25 +1522,41 @@ class RouterProvisioning
         return $commands;
     }
 
-    private static function buildManagementInterfaceScript($management, $hotspotBridge, $wan)
-    {
-        if ($management === '' || $management === $hotspotBridge || $management === $wan) {
-            return [];
-        }
+        private static function buildManagementInterfaceScript($management, $hotspotBridge, $wan, $settings = [])
+        {
+            if ($management === '' || $management === $hotspotBridge || $management === $wan) {
+                return [];
+            }
+            $mgmtIp = self::ip($settings['management_ip'] ?? '', '192.168.88.10');
+            $mgmtMac = self::mac($settings['management_allowed_mac'] ?? '');
+            $maxDevices = max(1, min(4, (int) ($settings['management_max_devices'] ?? 1)));
 
-        $commands = [
-            self::onceByFind('/interface list find name=' . self::q('MGMT'), '/interface list add name=' . self::q('MGMT') . ' comment=' . self::q('FASTNETPAY management interfaces')),
-        ];
+            $commands = [
+                '# FASTNETPAY management port: safe admin access only, one device allowed.',
+                self::onceByFind('/interface list find name=' . self::q('MGMT'), '/interface list add name=' . self::q('MGMT') . ' comment=' . self::q('FASTNETPAY management interfaces')),
+            ];
 
         if (self::isBridgeName($management)) {
             $commands[] = self::onceByFind('/interface bridge find name=' . self::q($management), '/interface bridge add name=' . self::q($management) . ' protocol-mode=rstp comment=' . self::q('FASTNETPAY management bridge'));
         }
 
-        $commands[] = ':do {:if ([:len [/interface list member find list=' . self::q('MGMT') . ' interface=' . self::q($management) . ']] = 0) do={/interface list member add list=' . self::q('MGMT') . ' interface=' . self::q($management) . ' comment=' . self::q('FASTNETPAY management mapping') . '}} on-error={:log warning ' . self::q('FASTNETPAY management interface not found or not mapped') . '}';
-        $commands[] = ':do {:foreach p in=[/interface bridge port find interface=' . self::q($management) . '] do={:local b [/interface bridge port get $p bridge]; :if ($b = ' . self::q($hotspotBridge) . ') do={/interface bridge port remove $p}}} on-error={:log warning ' . self::q('FASTNETPAY preserved management interface on existing management bridge') . '}';
+            $commands[] = ':do {:if ([:len [/interface list member find list=' . self::q('MGMT') . ' interface=' . self::q($management) . ']] = 0) do={/interface list member add list=' . self::q('MGMT') . ' interface=' . self::q($management) . ' comment=' . self::q('FASTNETPAY management mapping') . '}} on-error={:log warning ' . self::q('FASTNETPAY management interface not found or not mapped') . '}';
+            $commands[] = ':do {:foreach p in=[/interface bridge port find interface=' . self::q($management) . '] do={:local b [/interface bridge port get $p bridge]; :if ($b = ' . self::q($hotspotBridge) . ') do={/interface bridge port remove $p}}} on-error={:log warning ' . self::q('FASTNETPAY preserved management interface on existing management bridge') . '}';
+            $commands[] = self::onceByFind('/ip firewall nat find comment=' . self::q('FASTNETPAY management internet'), '/ip firewall nat add chain=srcnat in-interface-list=' . self::q('MGMT') . ' out-interface-list=' . self::q('WAN') . ' action=masquerade comment=' . self::q('FASTNETPAY management internet'));
+            $commands[] = self::onceByFind('/ip firewall filter find comment=' . self::q('FASTNETPAY block management to customer bridge'), '/ip firewall filter add chain=forward in-interface-list=' . self::q('MGMT') . ' out-interface=' . self::q($hotspotBridge) . ' action=drop comment=' . self::q('FASTNETPAY block management to customer bridge'));
+            $commands[] = ':do {:local c [:len [/interface bridge host find on-interface=' . self::q($management) . ']]; :if ($c > ' . (int) $maxDevices . ') do={:log warning ' . self::q('FASTNETPAY management port has more than ' . $maxDevices . ' device(s) detected') . '}} on-error={:log warning ' . self::q('FASTNETPAY could not count management port devices') . '}';
+            if ($mgmtMac !== '' && (($settings['management_bind_mac'] ?? 'no') === 'yes')) {
+                $commands[] = self::onceByFind('/ip firewall address-list find list=' . self::q('fastnetpay-management-device') . ' address=' . self::q($mgmtIp), '/ip firewall address-list add list=' . self::q('fastnetpay-management-device') . ' address=' . self::q($mgmtIp) . ' comment=' . self::q('FASTNETPAY bound management device IP'));
+                $commands[] = ':do {/ip dhcp-server lease make-static [find mac-address=' . self::q($mgmtMac) . ']} on-error={:log warning ' . self::q('FASTNETPAY management MAC was not found in DHCP leases yet') . '}';
+                $commands[] = ':do {' . self::upsertByFind('/ip dhcp-server lease find mac-address=' . self::q($mgmtMac), '/ip dhcp-server lease add address=' . self::q($mgmtIp) . ' mac-address=' . self::q($mgmtMac) . ' comment=' . self::q('FASTNETPAY single management device'), '/ip dhcp-server lease set [find mac-address=' . self::q($mgmtMac) . '] address=' . self::q($mgmtIp) . ' comment=' . self::q('FASTNETPAY single management device')) . '} on-error={:log warning ' . self::q('FASTNETPAY management DHCP lease binding failed') . '}';
+                $commands[] = ':do {' . self::onceByFind('/interface bridge filter find comment=' . self::q('FASTNETPAY allow bound management MAC'), '/interface bridge filter add chain=forward in-interface=' . self::q($management) . ' src-mac-address=' . self::q($mgmtMac) . ' action=accept comment=' . self::q('FASTNETPAY allow bound management MAC')) . '} on-error={:log warning ' . self::q('FASTNETPAY bridge filter allow rule not supported') . '}';
+                $commands[] = ':do {' . self::onceByFind('/interface bridge filter find comment=' . self::q('FASTNETPAY drop unknown management MAC'), '/interface bridge filter add chain=forward in-interface=' . self::q($management) . ' src-mac-address=!' . $mgmtMac . ' action=drop comment=' . self::q('FASTNETPAY drop unknown management MAC')) . '} on-error={:log warning ' . self::q('FASTNETPAY bridge filter drop rule not supported') . '}';
+            } else {
+                $commands[] = '# Add Management MAC in the wizard to enforce a single bound admin device on ' . $management . '. Without a MAC, FASTNETPAY only warns and keeps management access safe.';
+            }
 
-        return $commands;
-    }
+            return $commands;
+        }
 
     private static function gatewayAddressScript($address, $interface)
     {
@@ -1470,8 +1684,8 @@ class RouterProvisioning
         return $commands;
     }
 
-    private static function buildCaptivePortalScript($router, $settings)
-    {
+        private static function buildCaptivePortalScript($router, $settings)
+        {
         $routerId = $router ? (int) $router['id'] : 0;
         $token = $routerId > 0 ? self::portalTokenForRouter($routerId) : 'SAVE_ROUTER_FIRST';
         $base = self::hotspotApiBaseUrl($settings);
@@ -1506,13 +1720,62 @@ class RouterProvisioning
 
         $commands[] = '# Portal API base: ' . $base . '/?_route=api/hotspot';
 
-        return $commands;
-    }
+            return $commands;
+        }
+
+        private static function buildVpnScript($settings)
+        {
+            $mode = self::choice($settings['connection_mode'] ?? 'local', ['local', 'wireguard', 'sstp'], 'local');
+            $serverIp = self::ip($settings['vpn_server_ip'] ?? '', '10.100.0.1');
+            $routerIp = self::ip($settings['vpn_router_ip'] ?? '', '10.100.1.1');
+            $fastnetpayIp = self::ip($settings['fastnetpay_server_ip'] ?? '', self::defaultServerAddress());
+            $commands = [
+                '# FASTNETPAY remote management uses VPN first. Keep RouterOS API closed to the public internet.',
+                '# Recommended management range: 10.100.0.0/16. FASTNETPAY/VPS ' . $serverIp . ', this router ' . $routerIp . '.',
+            ];
+
+            if ($mode === 'wireguard') {
+                $port = self::port($settings['vpn_port'] ?? 51820, 51820);
+                $privateKey = trim((string) ($settings['wireguard_private_key'] ?? ''));
+                $publicKey = trim((string) ($settings['wireguard_public_key'] ?? ''));
+                $commands[] = '# WireGuard requires RouterOS v7. If this router is v6, use SSTP mode.';
+                $commands[] = ':do {:if ([:len [/interface wireguard find name=' . self::q('fastnetpay-wg') . ']] = 0) do={/interface wireguard add name=' . self::q('fastnetpay-wg') . ' listen-port=' . (int) $port . ($privateKey !== '' ? ' private-key=' . self::q($privateKey) : '') . ' comment=' . self::q('FASTNETPAY WireGuard management tunnel') . '} else={/interface wireguard set [find name=' . self::q('fastnetpay-wg') . '] listen-port=' . (int) $port . ' comment=' . self::q('FASTNETPAY WireGuard management tunnel') . '}} on-error={:log warning ' . self::q('FASTNETPAY WireGuard is not supported on this RouterOS version') . '}';
+                $commands[] = ':do {:if ([:len [/ip address find address=' . self::q($routerIp . '/16') . ']] = 0) do={/ip address add address=' . self::q($routerIp . '/16') . ' interface=' . self::q('fastnetpay-wg') . ' comment=' . self::q('FASTNETPAY WireGuard router IP') . '}} on-error={:log warning ' . self::q('FASTNETPAY WireGuard IP could not be assigned') . '}';
+                if ($publicKey !== '') {
+                    $commands[] = ':do {:if ([:len [/interface wireguard peers find comment=' . self::q('FASTNETPAY WireGuard server peer') . ']] = 0) do={/interface wireguard peers add interface=' . self::q('fastnetpay-wg') . ' public-key=' . self::q($publicKey) . ' allowed-address=' . self::q($serverIp . '/32') . ' persistent-keepalive=25s comment=' . self::q('FASTNETPAY WireGuard server peer') . '}} on-error={:log warning ' . self::q('FASTNETPAY WireGuard peer could not be added') . '}';
+                } else {
+                    $commands[] = '# Paste the FASTNETPAY/VPS WireGuard public key to let the wizard add the server peer automatically.';
+                }
+            } elseif ($mode === 'sstp') {
+                $server = self::cleanText($settings['sstp_server'] ?? '', 190);
+                $user = self::cleanText($settings['sstp_username'] ?? '', 120);
+                $pass = (string) ($settings['sstp_password'] ?? '');
+                $commands[] = '# SSTP is the fallback for older RouterOS v6 routers without WireGuard.';
+                if ($server !== '' && $user !== '' && $pass !== '') {
+                    $commands[] = self::upsertByFind('/interface sstp-client find name=' . self::q('fastnetpay-sstp'), '/interface sstp-client add name=' . self::q('fastnetpay-sstp') . ' connect-to=' . self::q($server) . ' user=' . self::q($user) . ' password=' . self::q($pass) . ' disabled=no comment=' . self::q('FASTNETPAY SSTP management tunnel'), '/interface sstp-client set [find name=' . self::q('fastnetpay-sstp') . '] connect-to=' . self::q($server) . ' user=' . self::q($user) . ' password=' . self::q($pass) . ' disabled=no comment=' . self::q('FASTNETPAY SSTP management tunnel'));
+                } else {
+                    $commands[] = '# Add SSTP server, username, and password in the wizard before applying SSTP mode.';
+                }
+            }
+
+            $restrictIp = (($settings['api_restrict_mode'] ?? 'local') === 'vpn') ? $serverIp : $fastnetpayIp;
+            if ($restrictIp) {
+                $commands[] = self::onceByFind('/ip firewall address-list find list=' . self::q('fastnetpay-management') . ' address=' . self::q($restrictIp), '/ip firewall address-list add list=' . self::q('fastnetpay-management') . ' address=' . self::q($restrictIp) . ' comment=' . self::q('FASTNETPAY VPN/API management host'));
+                $commands[] = '/ip service set api address=' . self::q($restrictIp . '/32') . ' disabled=no';
+                $commands[] = ':do {/ip service set api-ssl address=' . self::q($restrictIp . '/32') . ' disabled=no} on-error={:log warning ' . self::q('FASTNETPAY API-SSL service not available') . '}';
+                $commands[] = '# API restriction target: ' . $restrictIp . ' (' . (($settings['api_restrict_mode'] ?? 'local') === 'vpn' ? 'VPN only' : 'local FASTNETPAY server') . ').';
+            }
+
+            return $commands;
+        }
 
     private static function buildSecurityScript($settings)
     {
-        $level = $settings['security_level'];
-        $serverIp = self::ip($settings['fastnetpay_server_ip'], self::defaultServerAddress());
+            $level = $settings['security_level'];
+            $serverIp = (($settings['api_restrict_mode'] ?? 'local') === 'vpn' && ($settings['connection_mode'] ?? 'local') !== 'local')
+                ? self::ip($settings['vpn_server_ip'] ?? '', '10.100.0.1')
+                : self::ip($settings['fastnetpay_server_ip'], self::defaultServerAddress());
+        $hotspotInterface = self::rosName($settings['hotspot_interface'] ?: $settings['lan_interface'] ?: 'fastnetpay-bridge');
         $commands = [
             '# FASTNETPAY security hardening. Review management IPs before applying strict mode.',
             self::onceByFind('/ip firewall address-list find list=' . self::q('fastnetpay-management') . ' address=' . self::q($serverIp), '/ip firewall address-list add list=' . self::q('fastnetpay-management') . ' address=' . self::q($serverIp) . ' comment=' . self::q('FASTNETPAY server management access')),
@@ -1522,6 +1785,8 @@ class RouterProvisioning
             self::onceByFind('/ip firewall filter find comment=' . self::q('FASTNETPAY drop connection abuse'), '/ip firewall filter add chain=input src-address-list=' . self::q('fastnetpay-connection-abuse') . ' action=drop comment=' . self::q('FASTNETPAY drop connection abuse')),
             self::onceByFind('/ip firewall filter find comment=' . self::q('FASTNETPAY rate-limit ICMP'), '/ip firewall filter add chain=input protocol=icmp limit=10,5:packet action=accept comment=' . self::q('FASTNETPAY rate-limit ICMP')),
         ];
+
+        $commands = array_merge($commands, self::buildFastTrackQueueGuardScript($hotspotInterface));
 
         if (in_array($level, ['recommended', 'strict'], true)) {
             $commands[] = self::onceByFind('/ip firewall filter find comment=' . self::q('FASTNETPAY detect port scans'), '/ip firewall filter add chain=input protocol=tcp psd=21,3s,3,1 action=add-src-to-address-list address-list=' . self::q('fastnetpay-port-scanners') . ' address-list-timeout=1d comment=' . self::q('FASTNETPAY detect port scans'));
@@ -1550,6 +1815,26 @@ class RouterProvisioning
         return $commands;
     }
 
+    private static function buildFastTrackQueueGuardScript($hotspotInterface)
+    {
+        $hotspotInterface = self::rosName($hotspotInterface ?: 'fastnetpay-bridge');
+        return [
+            '# FASTNETPAY bandwidth guard: RouterOS FastTrack bypasses simple queues. These rules keep managed hotspot clients on their package speed.',
+            self::fastTrackQueueGuardCommand('FASTNETPAY hotspot queue guard upload', 'in-interface', $hotspotInterface),
+            self::fastTrackQueueGuardCommand('FASTNETPAY hotspot queue guard download', 'out-interface', $hotspotInterface),
+        ];
+    }
+
+    private static function fastTrackQueueGuardCommand($comment, $interfaceProperty, $interface)
+    {
+        $add = '/ip firewall filter add chain=forward connection-state=established,related action=accept ' . $interfaceProperty . '=' . self::q($interface) . ' comment=' . self::q($comment);
+        return ':local ft [/ip firewall filter find action=fasttrack-connection]; '
+            . ':foreach r in=[/ip firewall filter find comment=' . self::q($comment) . '] do={/ip firewall filter remove $r}; '
+            . ':if ([:len $ft] > 0) do={' . $add . ' place-before=[:pick $ft 0]} else={' . $add . '}; '
+            . ':local guard [/ip firewall filter find comment=' . self::q($comment) . ']; '
+            . ':if (([:len $ft] > 0) && ([:len $guard] > 0)) do={/ip firewall filter move [:pick $guard 0] destination=[:pick $ft 0]}';
+    }
+
     private static function buildWarnings($router, $settings, $payment)
     {
         $warnings = [];
@@ -1562,10 +1847,22 @@ class RouterProvisioning
         if (trim((string) ($settings['api_password'] ?? '')) === '') {
             $warnings[] = 'FASTNETPAY API user password is empty. The wizard can still test with saved PHPNuxBill router credentials, but production provisioning should use fastnet-api-usr.';
         }
-        if ($settings['security_level'] === 'strict') {
-            $warnings[] = 'Strict ISP Mode can restrict management services. Confirm FASTNETPAY server IP and out-of-band router access before applying.';
-        }
-        $routerHost = self::cidrIp($settings['host'] ?? '');
+            if ($settings['security_level'] === 'strict') {
+                $warnings[] = 'Strict ISP Mode can restrict management services. Confirm FASTNETPAY server IP and out-of-band router access before applying.';
+            }
+            if (($settings['management_allowed_mac'] ?? '') === '') {
+                $warnings[] = 'Management port will pass internet and remain isolated, but one-device enforcement is strongest after you bind the trusted admin device MAC address.';
+            }
+            if (($settings['connection_mode'] ?? 'local') === 'wireguard') {
+                $warnings[] = 'WireGuard mode requires RouterOS v7. Use SSTP mode for older RouterOS v6 routers.';
+            }
+            if (($settings['connection_mode'] ?? 'local') === 'sstp' && (trim((string) ($settings['sstp_server'] ?? '')) === '' || trim((string) ($settings['sstp_username'] ?? '')) === '')) {
+                $warnings[] = 'SSTP mode needs a server address and router client credentials before automatic VPN provisioning can be applied.';
+            }
+            if (($settings['connection_mode'] ?? 'local') !== 'local' && ($settings['api_restrict_mode'] ?? 'local') !== 'vpn') {
+                $warnings[] = 'Remote production routers should restrict RouterOS API to the VPN server IP after tunnel testing.';
+            }
+            $routerHost = self::cidrIp($settings['host'] ?? '');
         if ($routerHost !== '' && self::cidrIp($settings['lan_gateway']) === $routerHost && self::rosName($settings['management_interface'] ?? 'ether4') !== self::rosName($settings['hotspot_interface'] ?? 'fastnetpay-bridge')) {
             $warnings[] = 'Hotspot gateway matches the management/API router IP. FASTNETPAY will protect management by using a separate Hotspot subnet; keep ether4 connected for Winbox/API.';
         }
@@ -1883,6 +2180,7 @@ class RouterProvisioning
             'out-interface-list' => 'WAN',
             'action' => 'accept',
         ]);
+        self::reconcileFastTrackQueueGuard($client, $hotspotInterface);
 
         foreach (['udp', 'tcp'] as $protocol) {
             self::apiUpsert($client, '/ip/firewall/nat/print', '/ip/firewall/nat/add', '/ip/firewall/nat/set', 'comment', 'FASTNETPAY force hotspot ' . strtoupper($protocol) . ' DNS to router', [
@@ -1995,6 +2293,45 @@ class RouterProvisioning
         foreach (self::safeRows($client, '/ip/hotspot/host/print') as $row) {
             if (self::prop($row, 'authorized', 'false') === 'false') {
                 self::apiRemove($client, '/ip/hotspot/host/remove', self::prop($row, '.id'));
+            }
+        }
+    }
+
+    private static function reconcileFastTrackQueueGuard($client, $hotspotInterface)
+    {
+        $hotspotInterface = self::rosName($hotspotInterface ?: 'fastnetpay-bridge');
+        $fasttrackId = '';
+        foreach (self::safeRows($client, '/ip/firewall/filter/print') as $row) {
+            if (self::prop($row, 'action') === 'fasttrack-connection' && self::prop($row, 'disabled', 'false') !== 'true') {
+                $fasttrackId = self::prop($row, '.id');
+                break;
+            }
+        }
+
+        $rules = [
+            'FASTNETPAY hotspot queue guard upload' => ['in-interface' => $hotspotInterface],
+            'FASTNETPAY hotspot queue guard download' => ['out-interface' => $hotspotInterface],
+        ];
+
+        foreach ($rules as $comment => $matcher) {
+            $existing = self::findRowBy(self::safeRows($client, '/ip/firewall/filter/print'), 'comment', $comment);
+            if ($existing) {
+                self::apiRemove($client, '/ip/firewall/filter/remove', self::prop($existing, '.id'));
+            }
+
+            $addArgs = array_merge([
+                'chain' => 'forward',
+                'connection-state' => 'established,related',
+                'action' => 'accept',
+                'comment' => $comment,
+            ], $matcher);
+            if ($fasttrackId !== '') {
+                $addArgs['place-before'] = $fasttrackId;
+            }
+
+            $id = self::apiAdd($client, '/ip/firewall/filter/add', $addArgs);
+            if ($fasttrackId !== '') {
+                self::apiMoveBefore($client, '/ip/firewall/filter/move', $id, $fasttrackId);
             }
         }
     }
@@ -2320,6 +2657,24 @@ class RouterProvisioning
         }
     }
 
+    private static function apiMoveBefore($client, $path, $id, $destinationId)
+    {
+        if ($id === '' || $destinationId === '' || $id === $destinationId) {
+            return;
+        }
+        try {
+            self::throwOnTrap(
+                $client->sendSync(
+                    (new RouterOS\Request($path))
+                        ->setArgument('numbers', $id)
+                        ->setArgument('destination', $destinationId)
+                ),
+                $path
+            );
+        } catch (Throwable $ignored) {
+        }
+    }
+
     private static function throwOnTrap($response, $path)
     {
         foreach ($response as $row) {
@@ -2386,8 +2741,8 @@ class RouterProvisioning
         }
     }
 
-    private static function logStep($runId, $name, $status, $output = '', $error = '')
-    {
+        private static function logStep($runId, $name, $status, $output = '', $error = '')
+        {
         $row = null;
         if (in_array($status, ['success', 'failed', 'warning'], true)) {
             $row = ORM::for_table('router_provisioning_steps')
@@ -2402,6 +2757,10 @@ class RouterProvisioning
             $row->run_id = (int) $runId;
             $row->step_name = $name;
             $row->started_at = date('Y-m-d H:i:s');
+            if (class_exists('Tenant')) {
+                $run = ORM::for_table('router_provisioning_runs')->find_one((int) $runId);
+                Tenant::stamp($row, $run ? Tenant::rowTenantId($run) : null, 'router_provisioning_steps');
+            }
         }
         $row->status = $status;
         $row->output = self::redact($output);
@@ -2418,24 +2777,72 @@ class RouterProvisioning
         return ORM::for_table('router_port_mappings')->where('router_id', (int) $routerId)->find_one();
     }
 
-    private static function savePortMapping($routerId, $settings)
-    {
-        if ((int) $routerId <= 0) {
-            return;
+        private static function savePortMapping($routerId, $settings)
+        {
+            if ((int) $routerId <= 0) {
+                return;
         }
         $row = self::portMapping($routerId);
         if (!$row) {
             $row = ORM::for_table('router_port_mappings')->create();
             $row->router_id = (int) $routerId;
+            if (class_exists('Tenant')) {
+                Tenant::stamp($row, ($settings['tenant_id'] ?? null) ?: null, 'router_port_mappings');
+            }
         }
         $row->wan_interface = $settings['wan_interface'];
         $row->lan_interface = $settings['lan_interface'];
         $row->hotspot_interface = $settings['hotspot_interface'];
-        $row->pppoe_interface = $settings['pppoe_interface'];
-        $row->management_interface = $settings['management_interface'];
-        $row->updated_at = date('Y-m-d H:i:s');
-        $row->save();
-    }
+            $row->pppoe_interface = $settings['pppoe_interface'];
+            $row->management_interface = $settings['management_interface'];
+            $row->management_ip = $settings['management_ip'] ?? '';
+            $row->management_allowed_mac = $settings['management_allowed_mac'] ?? '';
+            $row->connection_mode = $settings['connection_mode'] ?? 'local';
+            $row->vpn_ip = $settings['vpn_router_ip'] ?? '';
+            $row->updated_at = date('Y-m-d H:i:s');
+            $row->save();
+        }
+
+        private static function auditRouterAction($routerId, $adminId, $action, $summary)
+        {
+            try {
+                $row = ORM::for_table('router_management_audit_logs')->create();
+                $row->router_id = (int) $routerId ?: null;
+                $row->admin_id = (int) $adminId ?: null;
+                if (class_exists('Tenant')) {
+                    $router = $routerId ? ORM::for_table('tbl_routers')->find_one((int) $routerId) : null;
+                    Tenant::stamp($row, $router ? Tenant::rowTenantId($router) : null, 'router_management_audit_logs');
+                }
+                $row->action = substr(strip_tags((string) $action), 0, 120);
+                $row->summary = self::redact(substr(strip_tags((string) $summary), 0, 2000));
+                $row->created_at = date('Y-m-d H:i:s');
+                $row->save();
+            } catch (Throwable $e) {
+                _log('FASTNETPAY router audit failed: ' . $e->getMessage());
+            }
+        }
+
+        private static function saveRouterProvisioningSettings($router, $settings)
+        {
+            if (!$router) {
+                return;
+            }
+            try {
+                $router->management_url = $settings['secure_management_url'] ?? '';
+                $router->management_port = $settings['management_interface'] ?? '';
+                $router->management_mac = $settings['management_allowed_mac'] ?? '';
+                $router->management_ip = $settings['management_ip'] ?? '';
+                $router->vpn_mode = $settings['connection_mode'] ?? 'local';
+                $router->vpn_ip = $settings['vpn_router_ip'] ?? '';
+                $router->api_restrict_mode = $settings['api_restrict_mode'] ?? 'local';
+                $router->tenant_id = (int) ($settings['tenant_id'] ?? 0) ?: null;
+                $router->site_id = (int) ($settings['site_id'] ?? 0) ?: null;
+                $router->router_group = $settings['router_group'] ?? '';
+                $router->save();
+            } catch (Throwable $e) {
+                _log('FASTNETPAY router provisioning metadata save failed: ' . $e->getMessage());
+            }
+        }
 
     private static function clientFromSettings($settings, $router = null)
     {
@@ -2900,6 +3307,12 @@ class RouterProvisioning
         $base = self::cleanBaseUrl($base);
         $apiBase = ($base !== '' ? $base : self::currentRequestBaseUrl()) . '/?_route=api/hotspot';
         $support = self::cfg('mpesastkpush_support_phone', '');
+        if (class_exists('JoviPay')) {
+            $joviPaySettings = JoviPay::publicSettings();
+            if (!empty($joviPaySettings['support_phone'])) {
+                $support = $joviPaySettings['support_phone'];
+            }
+        }
         $gateway = self::ip($gateway, '192.168.90.1');
         $portal = self::domain($portal, 'portal.fastnetpay.test');
 
@@ -3028,17 +3441,35 @@ class RouterProvisioning
       <p>Select a package, pay with M-Pesa STK Push, and get connected automatically.</p>
     </section>
     <section id="fnpMessage" class="fnp-message">Loading packages...</section>
-    <section id="fnpPackages" class="fnp-packages"></section>
-    <section class="fnp-pay">
-      <h2>Pay with M-Pesa</h2>
-      <input id="fnpPhone" type="tel" inputmode="tel" placeholder="07XXXXXXXX">
-      <button id="fnpPay" type="button">Pay Now</button>
-      <small>Check your phone and enter your M-Pesa PIN.</small>
+    <nav class="fnp-tabs" aria-label="FASTNETPAY payment options">
+      <button type="button" class="fnp-tab-btn active" data-fnp-tab="Pay">M-Pesa</button>
+      <button type="button" class="fnp-tab-btn" data-fnp-tab="Voucher">Voucher</button>
+      <button type="button" class="fnp-tab-btn" data-fnp-tab="Reconnect">Already Paid?</button>
+    </nav>
+    <section id="fnpTabPay" class="fnp-tab-panel active">
+      <section id="fnpPackages" class="fnp-packages"></section>
+      <section class="fnp-pay">
+        <h2>Pay with M-Pesa</h2>
+        <input id="fnpPhone" type="tel" inputmode="tel" placeholder="07XXXXXXXX">
+        <button id="fnpPay" type="button">Pay Now</button>
+        <small>Check your phone and enter your M-Pesa PIN.</small>
+      </section>
     </section>
-    <section class="fnp-voucher">
-      <h2>Have a voucher?</h2>
-      <input id="fnpVoucher" type="text" placeholder="Voucher code">
-      <button id="fnpVoucherBtn" type="button">Activate Voucher</button>
+    <section id="fnpTabVoucher" class="fnp-tab-panel">
+      <section class="fnp-voucher">
+        <h2>Have a voucher?</h2>
+        <input id="fnpVoucher" type="text" placeholder="Voucher code">
+        <button id="fnpVoucherBtn" type="button">Activate Voucher</button>
+      </section>
+    </section>
+    <section id="fnpTabReconnect" class="fnp-tab-panel">
+      <section class="fnp-reconnect">
+        <h2>Already paid?</h2>
+        <p>Use your M-Pesa transaction code if payment succeeded but the session did not reconnect automatically.</p>
+        <input id="fnpReceipt" type="text" autocapitalize="characters" placeholder="M-Pesa code, e.g. TXX123ABC">
+        <input id="fnpReconnectPhone" type="tel" inputmode="tel" placeholder="Phone number (optional)">
+        <button id="fnpReconnectBtn" type="button">Reconnect Internet</button>
+      </section>
     </section>
     <footer>Support: ' . $support . '</footer>
   </main>
@@ -3090,14 +3521,14 @@ class RouterProvisioning
     private static function hotspotCss()
     {
         return <<<'CSS'
-:root{--green:#41a146;--gold:#f9c02b;--bg:#f1f1f1;--text:#1f2933;--muted:#667085;--line:#e5e7eb;--white:#fff}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:var(--text)}.fnp-hotspot{width:min(980px,100%);margin:0 auto;padding:18px}.fnp-hero{position:relative;overflow:hidden;background:linear-gradient(135deg,#41a146,#2f7f34);color:#fff;border-radius:22px;padding:24px;box-shadow:0 18px 45px rgba(31,41,51,.18)}.fnp-hero:after{content:"";position:absolute;right:-40px;top:-50px;width:160px;height:160px;border-radius:50%;background:rgba(249,192,43,.35)}.fnp-mark{display:inline-flex;background:#f9c02b;color:#1f2933;font-weight:800;border-radius:999px;padding:7px 12px;margin-bottom:10px}.fnp-hero h1{margin:0;font-size:clamp(26px,7vw,44px);letter-spacing:0}.fnp-hero p{margin:10px 0 0;line-height:1.5;max-width:620px}.fnp-message{margin:14px 0;padding:12px 14px;border-radius:14px;background:#fff;box-shadow:0 8px 24px rgba(31,41,51,.1);font-size:14px}.fnp-message.ok{border-left:5px solid #41a146}.fnp-message.err{border-left:5px solid #dc3545}.fnp-packages{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}.fnp-plan{position:relative;border:1px solid var(--line);background:#fff;text-align:left;border-radius:18px;padding:15px;box-shadow:0 10px 28px rgba(31,41,51,.09);min-height:174px;transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}.fnp-plan:hover{transform:translateY(-2px);box-shadow:0 16px 34px rgba(31,41,51,.13);border-color:rgba(65,161,70,.35)}.fnp-plan.active{outline:3px solid rgba(249,192,43,.75);border-color:#f9c02b}.fnp-plan b{display:block;font-size:16px;line-height:1.25;padding-right:28px}.fnp-plan .price{display:block;color:#41a146;margin-top:10px;font-size:24px;font-weight:900}.fnp-plan .meta{display:grid;gap:7px;margin:12px 0}.fnp-chip{display:inline-flex;align-items:center;width:max-content;max-width:100%;border-radius:999px;padding:6px 9px;background:#f3f7f4;color:#1f2933;font-size:12px;font-weight:700}.fnp-chip.gold{background:#fff6d8}.fnp-plan .select{position:absolute;right:12px;top:12px;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:#eef7ef;color:#41a146;font-weight:900}.fnp-plan.active .select{background:#f9c02b;color:#1f2933}.fnp-plan .cta{display:block;margin-top:10px;color:#41a146;font-weight:800;font-size:13px}.fnp-pay,.fnp-voucher{margin-top:14px;background:#fff;border-radius:18px;padding:16px;box-shadow:0 10px 28px rgba(31,41,51,.1)}h2{font-size:18px;margin:0 0 10px}input{width:100%;height:46px;border:1px solid #d6dde5;border-radius:14px;padding:0 14px;font-size:16px;margin-bottom:10px}input:focus{outline:3px solid rgba(65,161,70,.18);border-color:#41a146}button{width:100%;min-height:46px;border:0;border-radius:14px;background:#41a146;color:#fff;font-weight:800;font-size:16px}button:disabled{opacity:.65}.fnp-voucher button{background:#f9c02b;color:#1f2933}small,footer{display:block;color:#667085;margin-top:10px}.fnp-simple{text-align:center;min-height:100vh;display:grid;place-content:center}.fnp-simple a{color:#41a146;font-weight:800}@media(max-width:520px){.fnp-hotspot{padding:12px}.fnp-hero{border-radius:18px;padding:22px}.fnp-packages{grid-template-columns:1fr}.fnp-plan{min-height:0}}
+:root{--green:#41a146;--gold:#f9c02b;--bg:#f1f1f1;--text:#1f2933;--muted:#667085;--line:#e5e7eb;--white:#fff}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:var(--text)}.fnp-hotspot{width:min(980px,100%);margin:0 auto;padding:18px}.fnp-hero{position:relative;overflow:hidden;background:linear-gradient(135deg,#41a146,#2f7f34);color:#fff;border-radius:22px;padding:24px;box-shadow:0 18px 45px rgba(31,41,51,.18)}.fnp-hero:after{content:"";position:absolute;right:-40px;top:-50px;width:160px;height:160px;border-radius:50%;background:rgba(249,192,43,.35)}.fnp-mark{display:inline-flex;background:#f9c02b;color:#1f2933;font-weight:800;border-radius:999px;padding:7px 12px;margin-bottom:10px}.fnp-hero h1{margin:0;font-size:clamp(26px,7vw,44px);letter-spacing:0}.fnp-hero p{margin:10px 0 0;line-height:1.5;max-width:620px}.fnp-message{margin:14px 0;padding:12px 14px;border-radius:14px;background:#fff;box-shadow:0 8px 24px rgba(31,41,51,.1);font-size:14px}.fnp-message.ok{border-left:5px solid #41a146}.fnp-message.err{border-left:5px solid #dc3545}.fnp-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0}.fnp-tab-btn{min-height:42px;background:#fff;color:#1f2933;border:1px solid #dde5df;box-shadow:0 8px 18px rgba(31,41,51,.08);font-size:14px}.fnp-tab-btn.active{background:#41a146;color:#fff;border-color:#41a146}.fnp-tab-panel{display:none}.fnp-tab-panel.active{display:block}.fnp-packages{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}.fnp-plan{position:relative;border:1px solid var(--line);background:#fff;text-align:left;border-radius:18px;padding:15px;box-shadow:0 10px 28px rgba(31,41,51,.09);min-height:174px;transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}.fnp-plan:hover{transform:translateY(-2px);box-shadow:0 16px 34px rgba(31,41,51,.13);border-color:rgba(65,161,70,.35)}.fnp-plan.active{outline:3px solid rgba(249,192,43,.75);border-color:#f9c02b}.fnp-plan b{display:block;font-size:16px;line-height:1.25;padding-right:28px}.fnp-plan .price{display:block;color:#41a146;margin-top:10px;font-size:24px;font-weight:900}.fnp-plan .meta{display:grid;gap:7px;margin:12px 0}.fnp-chip{display:inline-flex;align-items:center;width:max-content;max-width:100%;border-radius:999px;padding:6px 9px;background:#f3f7f4;color:#1f2933;font-size:12px;font-weight:700}.fnp-chip.gold{background:#fff6d8}.fnp-plan .select{position:absolute;right:12px;top:12px;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:#eef7ef;color:#41a146;font-weight:900}.fnp-plan.active .select{background:#f9c02b;color:#1f2933}.fnp-plan .cta{display:block;margin-top:10px;color:#41a146;font-weight:800;font-size:13px}.fnp-pay,.fnp-voucher,.fnp-reconnect{margin-top:14px;background:#fff;border-radius:18px;padding:16px;box-shadow:0 10px 28px rgba(31,41,51,.1)}.fnp-reconnect p{margin:0 0 12px;color:#667085;line-height:1.45}h2{font-size:18px;margin:0 0 10px}input{width:100%;height:46px;border:1px solid #d6dde5;border-radius:14px;padding:0 14px;font-size:16px;margin-bottom:10px}input:focus{outline:3px solid rgba(65,161,70,.18);border-color:#41a146}button{width:100%;min-height:46px;border:0;border-radius:14px;background:#41a146;color:#fff;font-weight:800;font-size:16px}button:disabled{opacity:.65}.fnp-voucher button{background:#f9c02b;color:#1f2933}.fnp-reconnect button{background:#1f2933;color:#fff}small,footer{display:block;color:#667085;margin-top:10px}.fnp-simple{text-align:center;min-height:100vh;display:grid;place-content:center}.fnp-simple a{color:#41a146;font-weight:800}@media(max-width:520px){.fnp-hotspot{padding:12px}.fnp-hero{border-radius:18px;padding:22px}.fnp-tabs{grid-template-columns:1fr}.fnp-packages{grid-template-columns:1fr}.fnp-plan{min-height:0}}
 CSS;
     }
 
     private static function hotspotJs()
     {
         return <<<'JS'
-(function(){var c=window.FNP_HOTSPOT||{},selected=null,payment=null,timer=null;function qs(id){return document.getElementById(id)}function esc(v){return String(v==null?"":v).replace(/[&<>"']/g,function(s){return({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"})[s]})}function msg(t,k){var el=qs("fnpMessage");if(el){el.className="fnp-message "+(k||"");el.textContent=t}}function api(action,data){data=data||{};data.router=c.routerId;data.token=c.token;data.mac=c.mac;data.ip=c.ip;return fetch(c.apiBase+"/"+action,{method:"POST",mode:"cors",credentials:"omit",cache:"no-store",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(data)}).then(function(r){return r.json().then(function(j){if(!r.ok||j.ok===false){throw new Error(j.message||"Request failed")}return j})})}function planCard(p){var b=document.createElement("button");b.type="button";b.className="fnp-plan";b.innerHTML='<span class="select">+</span><b>'+esc(p.name)+'</b><strong class="price">KES '+esc(p.price)+'</strong><span class="meta"><span class="fnp-chip">'+esc(p.validity||"Valid package")+'</span><span class="fnp-chip gold">'+esc(p.bandwidth||"Best available speed")+'</span><span class="fnp-chip">'+esc(p.limit||"Unlimited data")+'</span></span><span class="cta">Select package and proceed</span>';b.onclick=function(){selected=p.id;document.querySelectorAll(".fnp-plan").forEach(function(x){x.classList.remove("active");var s=x.querySelector(".select");if(s)s.textContent="+"});b.classList.add("active");var mark=b.querySelector(".select");if(mark)mark.textContent="OK";msg("Selected "+p.name+". Enter your M-Pesa phone.","ok");var phone=qs("fnpPhone");if(phone)phone.focus()};return b}function load(){api("packages",{}).then(function(j){var box=qs("fnpPackages");box.innerHTML="";(j.packages||[]).forEach(function(p){box.appendChild(planCard(p))});msg(j.packages&&j.packages.length?"Choose a package to continue.":"No packages are available yet.",j.packages&&j.packages.length?"ok":"err")}).catch(function(e){msg(e.message,"err")})}function poll(){if(!payment)return;api("payment-status",{payment_id:payment.payment_id,payment_token:payment.payment_token}).then(function(j){if(j.status==="paid"){msg("Payment received. Logging you in...","ok");if(j.username){qs("fnpLoginUser").value=j.username;qs("fnpLoginPass").value=j.password||j.username;setTimeout(function(){document.login.submit()},1200)}}else if(j.status==="failed"){msg(j.message||"Payment failed or was cancelled.","err");clearInterval(timer)}else{msg(j.message||"Payment pending. Check your phone.","ok")}}).catch(function(e){msg(e.message,"err")})}qs("fnpPay").onclick=function(){var phone=qs("fnpPhone").value;if(!selected){msg("Select a package first.","err");return}this.disabled=true;api("pay",{plan_id:selected,phone:phone}).then(function(j){payment=j;msg(j.message||"Check your phone and enter your M-Pesa PIN.","ok");timer=setInterval(poll,5000)}).catch(function(e){msg(e.message,"err")}).finally(function(){qs("fnpPay").disabled=false})};qs("fnpVoucherBtn").onclick=function(){api("voucher-login",{voucher:qs("fnpVoucher").value}).then(function(j){msg(j.message,"ok");if(j.username){qs("fnpLoginUser").value=j.username;qs("fnpLoginPass").value=j.password||j.username;setTimeout(function(){document.login.submit()},1000)}}).catch(function(e){msg(e.message,"err")})};load()})();
+(function(){var c=window.FNP_HOTSPOT||{},selected=null,payment=null,timer=null,pollDelay=5000;function qs(id){return document.getElementById(id)}function esc(v){return String(v==null?"":v).replace(/[&<>"']/g,function(s){return({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"})[s]})}function msg(t,k){var el=qs("fnpMessage");if(el){el.className="fnp-message "+(k||"");el.textContent=t}}function login(j,delay){if(j&&j.username){qs("fnpLoginUser").value=j.username;qs("fnpLoginPass").value=j.password||j.username;setTimeout(function(){document.login.submit()},delay||1000)}}function api(action,data){data=data||{};data.router=c.routerId;data.token=c.token;data.mac=c.mac;data.ip=c.ip;return fetch(c.apiBase+"/"+action,{method:"POST",mode:"cors",credentials:"omit",cache:"no-store",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(data)}).then(function(r){return r.json().then(function(j){if(!r.ok||j.ok===false){throw new Error(j.message||"Request failed")}return j})})}function showTab(name){document.querySelectorAll(".fnp-tab-btn").forEach(function(b){b.classList.toggle("active",b.getAttribute("data-fnp-tab")===name)});document.querySelectorAll(".fnp-tab-panel").forEach(function(p){p.classList.toggle("active",p.id==="fnpTab"+name)})}function initTabs(){document.querySelectorAll("[data-fnp-tab]").forEach(function(b){b.onclick=function(){showTab(b.getAttribute("data-fnp-tab"))}})}function planCard(p){var b=document.createElement("button");b.type="button";b.className="fnp-plan";b.innerHTML='<span class="select">+</span><b>'+esc(p.name)+'</b><strong class="price">KES '+esc(p.price)+'</strong><span class="meta"><span class="fnp-chip">'+esc(p.validity||"Valid package")+'</span><span class="fnp-chip gold">'+esc(p.bandwidth||"Best available speed")+'</span><span class="fnp-chip">'+esc(p.limit||"Unlimited data")+'</span></span><span class="cta">Select package and proceed</span>';b.onclick=function(){selected=p.id;document.querySelectorAll(".fnp-plan").forEach(function(x){x.classList.remove("active");var s=x.querySelector(".select");if(s)s.textContent="+"});b.classList.add("active");var mark=b.querySelector(".select");if(mark)mark.textContent="OK";showTab("Pay");msg("Selected "+p.name+". Enter your M-Pesa phone.","ok");var phone=qs("fnpPhone");if(phone)phone.focus()};return b}function load(){api("packages",{}).then(function(j){var box=qs("fnpPackages");box.innerHTML="";(j.packages||[]).forEach(function(p){box.appendChild(planCard(p))});msg(j.packages&&j.packages.length?"Choose a package to continue.":"No packages are available yet.",j.packages&&j.packages.length?"ok":"err")}).catch(function(e){msg(e.message,"err")})}function poll(){if(!payment)return;api("payment-status",{payment_id:payment.payment_id,payment_token:payment.payment_token}).then(function(j){if(j.status==="paid"){clearInterval(timer);msg("Payment received. Logging you in...","ok");login(j,1200)}else if(j.status==="failed"){clearInterval(timer);msg(j.message||"Payment failed or was cancelled.","err")}else{msg(j.message||"Payment pending. Check your phone.","ok")}}).catch(function(e){msg(e.message,"err")})}function pay(){var btn=qs("fnpPay"),phone=qs("fnpPhone").value;if(!selected){msg("Select a package first.","err");return}btn.disabled=true;api("pay",{plan_id:selected,phone:phone}).then(function(j){payment=j;pollDelay=Math.max(3000,parseInt(j.polling_interval||5,10)*1000);msg(j.message||"Check your phone and enter your M-Pesa PIN.","ok");clearInterval(timer);timer=setInterval(poll,pollDelay)}).catch(function(e){msg(e.message,"err")}).finally(function(){btn.disabled=false})}function voucher(){api("voucher-login",{voucher:qs("fnpVoucher").value}).then(function(j){msg(j.message,"ok");login(j,1000)}).catch(function(e){msg(e.message,"err")})}function reconnect(){var btn=qs("fnpReconnectBtn");btn.disabled=true;api("reconnect",{transaction_code:qs("fnpReceipt").value,phone:qs("fnpReconnectPhone").value}).then(function(j){msg(j.message||"Payment found. Logging you in...","ok");login(j,1000)}).catch(function(e){msg(e.message,"err")}).finally(function(){btn.disabled=false})}initTabs();qs("fnpPay").onclick=pay;qs("fnpVoucherBtn").onclick=voucher;qs("fnpReconnectBtn").onclick=reconnect;load()})();
 JS;
     }
 
@@ -3154,11 +3585,27 @@ JS;
         return preg_match('/^[a-z0-9.-]+$/', $value) ? $value : $default;
     }
 
-    private static function ip($value, $default = '')
-    {
-        $value = trim((string) $value);
-        return filter_var($value, FILTER_VALIDATE_IP) ? $value : $default;
-    }
+        private static function ip($value, $default = '')
+        {
+            $value = trim((string) $value);
+            return filter_var($value, FILTER_VALIDATE_IP) ? $value : $default;
+        }
+
+        private static function mac($value)
+        {
+            $value = strtoupper(trim((string) $value));
+            $value = str_replace('-', ':', $value);
+            return preg_match('/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/', $value) ? $value : '';
+        }
+
+        private static function cleanUrl($value)
+        {
+            $value = trim(strip_tags((string) $value));
+            if ($value === '') {
+                return '';
+            }
+            return filter_var($value, FILTER_VALIDATE_URL) ? substr($value, 0, 255) : '';
+        }
 
     private static function csvIps($value, $default)
     {
@@ -3225,12 +3672,15 @@ JS;
     private static function redact($value)
     {
         $value = (string) $value;
-        $patterns = [
-            '/(password=)"[^"]*"/i',
-            '/(secret=)"[^"]*"/i',
-            '/(passkey=)"[^"]*"/i',
-            '/(Authorization:\s*Bearer\s+)[A-Za-z0-9._-]+/i',
-        ];
+            $patterns = [
+                '/(password=)"[^"]*"/i',
+                '/(password=)[^\\s]+/i',
+                '/(secret=)"[^"]*"/i',
+                '/(secret=)[^\\s]+/i',
+                '/(passkey=)"[^"]*"/i',
+                '/(private-key=)"[^"]*"/i',
+                '/(Authorization:\s*Bearer\s+)[A-Za-z0-9._-]+/i',
+            ];
         return preg_replace($patterns, '$1"***"', $value);
     }
 }

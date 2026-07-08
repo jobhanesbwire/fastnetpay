@@ -57,6 +57,7 @@ class Package
                 'password' => $channel,
             ];
         }
+        $tenantId = class_exists('Tenant') ? (int) (($p['tenant_id'] ?? 0) ?: ($c['tenant_id'] ?? 0) ?: Tenant::currentId()) : 0;
 
         $add_cost = 0;
         $bills = [];
@@ -139,6 +140,9 @@ class Package
             $query->where('username', $c['username']);
         } else {
             $query->where('customer_id', $id_customer);
+        }
+        if (class_exists('Tenant')) {
+            $query = Tenant::scopeIfTenant($query, 'tbl_user_recharges');
         }
         $b = $query->find_one();
 
@@ -274,6 +278,9 @@ class Package
                 $b->method = "$gateway - $channel";
                 $b->routers = $router_name;
                 $b->type = $p['type'];
+                if (class_exists('Tenant')) {
+                    Tenant::stamp($b, $tenantId, 'tbl_user_recharges');
+                }
                 if ($admin) {
                     $b->admin_id = ($admin['id']) ? $admin['id'] : '0';
                 } else {
@@ -284,6 +291,9 @@ class Package
 
             // insert table transactions
             $t = ORM::for_table('tbl_transactions')->create();
+            if (class_exists('Tenant')) {
+                Tenant::stamp($t, $tenantId, 'tbl_transactions');
+            }
             $t->invoice = $inv = "INV-" . Package::_raid();
             $t->username = $c['username'];
             $t->user_id = $id_customer;
@@ -390,6 +400,9 @@ class Package
                 $d->method = "$gateway - $channel";
                 $d->routers = $router_name;
                 $d->type = $p['type'];
+                if (class_exists('Tenant')) {
+                    Tenant::stamp($d, $tenantId, 'tbl_user_recharges');
+                }
                 if ($admin) {
                     $d->admin_id = ($admin['id']) ? $admin['id'] : '0';
                 } else {
@@ -400,6 +413,9 @@ class Package
 
             // insert table transactions
             $t = ORM::for_table('tbl_transactions')->create();
+            if (class_exists('Tenant')) {
+                Tenant::stamp($t, $tenantId, 'tbl_transactions');
+            }
             $t->invoice = $inv = "INV-" . Package::_raid();
             $t->username = $c['username'];
             $t->user_id = $id_customer;
@@ -483,6 +499,9 @@ class Package
         global $admin, $config;
         // insert table transactions
         $t = ORM::for_table('tbl_transactions')->create();
+        if (class_exists('Tenant')) {
+            Tenant::stamp($t, (int) (($customer['tenant_id'] ?? 0) ?: Tenant::currentId()), 'tbl_transactions');
+        }
         $t->invoice = $inv = "INV-" . Package::_raid();
         $t->username = $customer['username'];
         $t->user_id = $customer['id'];
@@ -549,6 +568,9 @@ class Package
         }
         // insert table transactions
         $t = ORM::for_table('tbl_transactions')->create();
+        if (class_exists('Tenant')) {
+            Tenant::stamp($t, (int) (($customer['tenant_id'] ?? 0) ?: Tenant::currentId()), 'tbl_transactions');
+        }
         $t->invoice = $inv = "INV-" . Package::_raid();
         $t->username = $customer['username'];
         $t->user_id = $customer['id'];

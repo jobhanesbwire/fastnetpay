@@ -45,7 +45,11 @@ class MikrotikHotspot
 	{
 		$mikrotik = $this->info($plan['routers']);
 		$client = $this->getClient($mikrotik['ip_address'], $mikrotik['username'], $mikrotik['password']);
-		$t = ORM::for_table('tbl_user_recharges')->where('username', $customer['username'])->where('status', 'on')->find_one();
+		$query = ORM::for_table('tbl_user_recharges')->where('username', $customer['username'])->where('status', 'on');
+		if (class_exists('Tenant')) {
+			$query = Tenant::scopeIfTenant($query);
+		}
+		$t = $query->find_one();
 		if ($t) {
 			$printRequest = new RouterOS\Request('/ip/hotspot/user/print');
 			$printRequest->setArgument('.proplist', '.id,limit-uptime,limit-bytes-total');

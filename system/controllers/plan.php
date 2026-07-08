@@ -33,19 +33,56 @@ document.addEventListener("DOMContentLoaded", function(event) {
 </script>
 EOT;
 getUrl('docs');
+
+function fnp_plan_customer($id)
+{
+    return Tenant::scopeIfTenant(ORM::for_table('tbl_customers'))->find_one((int) $id);
+}
+
+function fnp_plan_plan($id)
+{
+    return Tenant::scopeIfTenant(ORM::for_table('tbl_plans'))->find_one((int) $id);
+}
+
+function fnp_plan_recharge($id)
+{
+    return Tenant::scopeIfTenant(ORM::for_table('tbl_user_recharges'))->find_one((int) $id);
+}
+
+function fnp_plan_transaction($id)
+{
+    return Tenant::scopeIfTenant(ORM::for_table('tbl_transactions'))->find_one((int) $id);
+}
+
+function fnp_plan_voucher($id)
+{
+    return Tenant::scopeIfTenant(ORM::for_table('tbl_voucher'))->find_one((int) $id);
+}
+
+function fnp_plan_router_exists($routerName)
+{
+    $routerName = trim((string) $routerName);
+    if ($routerName === '' || $routerName === 'radius') {
+        return true;
+    }
+    $query = ORM::for_table('tbl_routers')->where('name', $routerName);
+    return (bool) Tenant::scopeIfTenant($query)->find_one();
+}
+
 switch ($action) {
     case 'sync':
         if (!in_array($admin['user_type'], ['SuperAdmin', 'Admin'])) {
             _alert(Lang::T('You do not have permission to access this page'), 'danger', "dashboard");
         }
         set_time_limit(-1);
-        $turs = ORM::for_table('tbl_user_recharges')->where('status', 'on')->find_many();
+        $tursQuery = ORM::for_table('tbl_user_recharges')->where('status', 'on');
+        $turs = Tenant::scopeIfTenant($tursQuery)->find_many();
         $log = '';
         $router = '';
         foreach ($turs as $tur) {
-            $p = ORM::for_table('tbl_plans')->findOne($tur['plan_id']);
+            $p = fnp_plan_plan($tur['plan_id']);
             if ($p) {
-                $c = ORM::for_table('tbl_customers')->findOne($tur['customer_id']);
+                $c = fnp_plan_customer($tur['customer_id']);
                 if ($c) {
                     $dvc = Package::getDevice($p);
                     if ($_app_stage != 'demo') {
@@ -75,7 +112,7 @@ switch ($action) {
         }
         $ui->assign('xfooter', $select2_customer);
         if (isset($routes['2']) && !empty($routes['2'])) {
-            $ui->assign('cust', ORM::for_table('tbl_customers')->find_one($routes['2']));
+            $ui->assign('cust', fnp_plan_customer($routes['2']));
         }
         $usings = explode(',', $config['payment_usings']);
         $usings = array_filter(array_unique($usings));
@@ -100,12 +137,21 @@ switch ($action) {
         if ($id_customer == '' or $server == '' or $planId == '' or $using == '') {
             $msg .= Lang::T('All field is required') . '<br>';
         }
+        if ($server !== '' && !fnp_plan_router_exists($server)) {
+            $msg .= Lang::T('Router not found for this tenant') . '<br>';
+        }
 
         if ($msg == '') {
             $gateway = 'Recharge';
             $channel = $admin['fullname'];
-            $cust = User::_info($id_customer);
-            $plan = ORM::for_table('tbl_plans')->find_one($planId);
+            $cust = fnp_plan_customer($id_customer);
+            $plan = fnp_plan_plan($planId);
+            if (!$cust) {
+                r2(getUrl('plan/recharge'), 'e', Lang::T('Customer not found'));
+            }
+            if (!$plan) {
+                r2(getUrl('plan/recharge'), 'e', Lang::T('Plan not found'));
+            }
             list($bills, $add_cost) = User::getBills($id_customer);
             $add_inv = User::getAttribute("Invoice", $id_customer);
             if (!empty($add_inv)) {
@@ -181,11 +227,12 @@ switch ($action) {
         $using = _post('using');
         $svoucher = _post('svoucher');
 
-        $plan = ORM::for_table('tbl_plans')->find_one($planId);
+        $plan = fnp_plan_plan($planId);
 
         if (!empty(App::getVoucherValue($svoucher))) {
             $username = App::getVoucherValue($svoucher);
-            $in = ORM::for_table('tbl_transactions')->where('username', $username)->order_by_desc('id')->find_one();
+            $inQuery = ORM::for_table('tbl_transactions')->where('username', $username)->order_by_desc('id');
+            $in = Tenant::scopeIfTenant($inQuery)->find_one();
             Package::createInvoice($in);
             $ui->display('admin/plan/invoice.tpl');
             die();
@@ -195,11 +242,20 @@ switch ($action) {
         if ($id_customer == '' or $server == '' or $planId == '' or $using == '') {
             $msg .= Lang::T('All field is required') . '<br>';
         }
+        if ($server !== '' && !fnp_plan_router_exists($server)) {
+            $msg .= Lang::T('Router not found for this tenant') . '<br>';
+        }
 
         if ($msg == '') {
             $gateway = ucwords($using);
             $channel = $admin['fullname'];
-            $cust = User::_info($id_customer);
+            $cust = fnp_plan_customer($id_customer);
+            if (!$cust) {
+                r2(getUrl('plan/recharge'), 'e', Lang::T('Customer not found'));
+            }
+            if (!$plan) {
+                r2(getUrl('plan/recharge'), 'e', Lang::T('Plan not found'));
+            }
             list($bills, $add_cost) = User::getBills($id_customer);
 
             // Tax calculation start
@@ -243,7 +299,8 @@ switch ($action) {
                 if ($using == 'balance') {
                     Balance::min($cust['id'], $total_cost);
                 }
-                $in = ORM::for_table('tbl_transactions')->where('username', $cust['username'])->order_by_desc('id')->find_one();
+                $inQuery = ORM::for_table('tbl_transactions')->where('username', $cust['username'])->order_by_desc('id');
+                $in = Tenant::scopeIfTenant($inQuery)->find_one();
                 Package::createInvoice($in);
                 App::setVoucher($svoucher, $cust['username']);
                 $ui->display('admin/plan/invoice.tpl');
@@ -258,10 +315,14 @@ switch ($action) {
 
     case 'view':
         $id = $routes['2'];
-        $in = ORM::for_table('tbl_transactions')->where('id', $id)->find_one();
+        $in = fnp_plan_transaction($id);
+        if (!$in) {
+            r2(getUrl('reports/transactions'), 'e', Lang::T('Transaction not found'));
+        }
         $ui->assign('in', $in);
         if (!empty($routes['3']) && $routes['3'] == 'send') {
-            $c = ORM::for_table('tbl_customers')->where('username', $in['username'])->find_one();
+            $customerQuery = ORM::for_table('tbl_customers')->where('username', $in['username']);
+            $c = Tenant::scopeIfTenant($customerQuery)->find_one();
             if ($c) {
                 Message::sendInvoice($c, $in);
                 r2(getUrl('plan/view/') . $id, 's', "Success send to customer");
@@ -300,7 +361,10 @@ switch ($action) {
             if (empty($id)) {
                 $id = $routes['2'];
             }
-            $d = ORM::for_table('tbl_transactions')->where('id', $id)->find_one();
+            $d = fnp_plan_transaction($id);
+            if (!$d) {
+                r2(getUrl('reports/transactions'), 'e', Lang::T('Transaction not found'));
+            }
             $ui->assign('in', $d);
             $ui->assign('date', Lang::dateAndTimeFormat($d['recharged_on'], $d['recharged_time']));
         }
@@ -313,22 +377,21 @@ switch ($action) {
             _alert(Lang::T('You do not have permission to access this page'), 'danger', "dashboard");
         }
         $id = $routes['2'];
-        $d = ORM::for_table('tbl_user_recharges')->find_one($id);
+        $d = fnp_plan_recharge($id);
         if ($d) {
             $ui->assign('d', $d);
-            $p = ORM::for_table('tbl_plans')->find_one($d['plan_id']);
+            $p = fnp_plan_plan($d['plan_id']);
             if (in_array($admin['user_type'], array('SuperAdmin', 'Admin'))) {
-                $ps = ORM::for_table('tbl_plans')
+                $psQuery = ORM::for_table('tbl_plans')
                     ->where('type', $p['type'])
-                    ->where('is_radius', $p['is_radius'])
-                    ->find_many();
+                    ->where('is_radius', $p['is_radius']);
             } else {
-                $ps = ORM::for_table('tbl_plans')
+                $psQuery = ORM::for_table('tbl_plans')
                     ->where("enabled", 1)
                     ->where('is_radius', $p['is_radius'])
-                    ->where('type', $p['type'])
-                    ->find_many();
+                    ->where('type', $p['type']);
             }
+            $ps = Tenant::scopeIfTenant($psQuery)->find_many();
             $ui->assign('p', $ps);
             run_hook('view_edit_customer_plan'); #HOOK
             $ui->assign('_title', 'Edit Plan');
@@ -343,11 +406,11 @@ switch ($action) {
             _alert(Lang::T('You do not have permission to access this page'), 'danger', "dashboard");
         }
         $id = $routes['2'];
-        $d = ORM::for_table('tbl_user_recharges')->find_one($id);
+        $d = fnp_plan_recharge($id);
         if ($d) {
             run_hook('delete_customer_active_plan'); #HOOK
-            $p = ORM::for_table('tbl_plans')->find_one($d['plan_id']);
-            $c = User::_info($d['customer_id']);
+            $p = fnp_plan_plan($d['plan_id']);
+            $c = fnp_plan_customer($d['customer_id']);
             $dvc = Package::getDevice($p);
             if ($_app_stage != 'demo') {
                 if (file_exists($dvc)) {
@@ -373,13 +436,13 @@ switch ($action) {
         $time = _post('time');
 
         $id = _post('id');
-        $d = ORM::for_table('tbl_user_recharges')->find_one($id);
+        $d = fnp_plan_recharge($id);
         if ($d) {
         } else {
             $msg .= Lang::T('Data Not Found') . '<br>';
         }
         $oldPlanID = $d['plan_id'];
-        $newPlan = ORM::for_table('tbl_plans')->where('id', $id_plan)->find_one();
+        $newPlan = fnp_plan_plan($id_plan);
         if ($newPlan) {
         } else {
             $msg .= ' Plan Not Found<br>';
@@ -397,10 +460,10 @@ switch ($action) {
             if ($oldPlanID != $id_plan) {
                 $d->plan_id = $newPlan['id'];
                 $d->namebp = $newPlan['name_plan'];
-                $customer = User::_info($d['customer_id']);
+                $customer = fnp_plan_customer($d['customer_id']);
                 //remove from old plan
                 if ($d['status'] == 'on') {
-                    $p = ORM::for_table('tbl_plans')->find_one($oldPlanID);
+                    $p = fnp_plan_plan($oldPlanID);
                     $dvc = Package::getDevice($p);
                     if ($_app_stage != 'demo') {
                         if (file_exists($dvc)) {
@@ -446,6 +509,7 @@ switch ($action) {
 
         $query = ORM::for_table('tbl_plans')
             ->inner_join('tbl_voucher', ['tbl_plans.id', '=', 'tbl_voucher.id_plan']);
+        $query = Tenant::scopeIfTenant($query, 'tbl_voucher');
 
         if (!empty($router)) {
             $query->where('tbl_voucher.routers', $router);
@@ -466,15 +530,23 @@ switch ($action) {
         $append_url = "&search=" . urlencode($search) . "&router=" . urlencode($router) . "&customer=" . urlencode($customer) . "&plan=" . urlencode($plan) . "&status=" . urlencode($status);
 
         // option customers
-        $ui->assign('customers', ORM::for_table('tbl_voucher')->distinct()->select("user")->whereNotEqual("user", '0')->findArray());
+        $voucherUsersQuery = ORM::for_table('tbl_voucher')->distinct()->select("user")->whereNotEqual("user", '0');
+        $voucherUsersQuery = Tenant::scopeIfTenant($voucherUsersQuery);
+        $ui->assign('customers', $voucherUsersQuery->findArray());
         // option plans
-        $plns = ORM::for_table('tbl_voucher')->distinct()->select("id_plan")->findArray();
+        $voucherPlansQuery = ORM::for_table('tbl_voucher')->distinct()->select("id_plan");
+        $voucherPlansQuery = Tenant::scopeIfTenant($voucherPlansQuery);
+        $plns = $voucherPlansQuery->findArray();
         if (count($plns) > 0) {
-            $ui->assign('plans', ORM::for_table('tbl_plans')->selects(["id", 'name_plan'])->where_in('id', array_column($plns, 'id_plan'))->findArray());
+            $planOptionQuery = ORM::for_table('tbl_plans')->selects(["id", 'name_plan'])->where_in('id', array_column($plns, 'id_plan'));
+            $planOptionQuery = Tenant::scopeIfTenant($planOptionQuery);
+            $ui->assign('plans', $planOptionQuery->findArray());
         } else {
             $ui->assign('plans', []);
         }
-        $ui->assign('routers', array_column(ORM::for_table('tbl_voucher')->distinct()->select("routers")->findArray(), 'routers'));
+        $voucherRoutersQuery = ORM::for_table('tbl_voucher')->distinct()->select("routers");
+        $voucherRoutersQuery = Tenant::scopeIfTenant($voucherRoutersQuery);
+        $ui->assign('routers', array_column($voucherRoutersQuery->findArray(), 'routers'));
 
         if ($search != '') {
             if (in_array($admin['user_type'], ['SuperAdmin', 'Admin'])) {
@@ -538,10 +610,15 @@ switch ($action) {
             _alert(Lang::T('You do not have permission to access this page'), 'danger', "dashboard");
         }
         $ui->assign('_title', Lang::T('Add Vouchers'));
-        $c = ORM::for_table('tbl_customers')->find_many();
+        $customerQuery = Tenant::scopeIfTenant(ORM::for_table('tbl_customers'));
+        $c = $customerQuery->find_many();
         $ui->assign('c', $c);
+        $config['voucher_prefix'] = Tenant::setting('voucher', 'prefix', $config['voucher_prefix'] ?? 'FNP-');
         if (empty($config['voucher_prefix'])) {
             $config['voucher_prefix'] = 'FNP-';
+            if (Tenant::isTenantRequest()) {
+                Tenant::saveSetting('voucher', 'prefix', 'FNP-', false);
+            } else {
             $prefixConfig = ORM::for_table('tbl_appconfig')->where('setting', 'voucher_prefix')->find_one();
             if (!$prefixConfig) {
                 $prefixConfig = ORM::for_table('tbl_appconfig')->create();
@@ -549,10 +626,15 @@ switch ($action) {
             }
             $prefixConfig->value = 'FNP-';
             $prefixConfig->save();
+            }
         }
-        $p = ORM::for_table('tbl_plans')->where('enabled', '1')->order_by_asc('type')->order_by_asc('name_plan')->find_many();
+        $planQuery = ORM::for_table('tbl_plans')->where('enabled', '1')->order_by_asc('type')->order_by_asc('name_plan');
+        $planQuery = Tenant::scopeIfTenant($planQuery);
+        $p = $planQuery->find_many();
         $ui->assign('p', $p);
-        $r = ORM::for_table('tbl_routers')->where('enabled', '1')->find_many();
+        $routerQuery = ORM::for_table('tbl_routers')->where('enabled', '1');
+        $routerQuery = Tenant::scopeIfTenant($routerQuery);
+        $r = $routerQuery->find_many();
         $ui->assign('r', $r);
         run_hook('view_add_voucher'); #HOOK
         $ui->display('admin/voucher/add.tpl');
@@ -565,11 +647,13 @@ switch ($action) {
         $time3months = strtotime('-3 months');
         $d = ORM::for_table('tbl_voucher')->where_equal('status', '1')
             ->where_raw("UNIX_TIMESTAMP(used_date) < $time3months")
-            ->findMany();
+            ;
+        $d = Tenant::scopeIfTenant($d)->findMany();
         if ($d) {
             $jml = 0;
             foreach ($d as $v) {
-                if (!ORM::for_table('tbl_user_recharges')->where_equal("method", 'Voucher - ' . $v['code'])->findOne()) {
+                $usedQuery = ORM::for_table('tbl_user_recharges')->where_equal("method", 'Voucher - ' . $v['code']);
+                if (!Tenant::scopeIfTenant($usedQuery)->findOne()) {
                     $v->delete();
                     $jml++;
                 }
@@ -657,6 +741,8 @@ switch ($action) {
                 ->left_outer_join('tbl_voucher', array('tbl_plans.id', '=', 'tbl_voucher.id_plan'))
                 ->where('tbl_voucher.status', '0');
         }
+        $v = Tenant::scopeIfTenant($v, 'tbl_voucher');
+        $vc = Tenant::scopeIfTenant($vc, 'tbl_voucher');
         if (in_array($admin['user_type'], ['SuperAdmin', 'Admin'])) {
             $v = $v->find_many();
             $vc = $vc->count();
@@ -678,7 +764,7 @@ switch ($action) {
         $ui->assign('vpl', $vpl);
         $ui->assign('pagebreak', $pagebreak);
 
-        $plans = ORM::for_table('tbl_plans')->find_many();
+        $plans = Tenant::scopeIfTenant(ORM::for_table('tbl_plans'))->find_many();
         $ui->assign('plans', $plans);
         $ui->assign('limit', $limit);
         $ui->assign('planid', $planid);
@@ -691,8 +777,8 @@ switch ($action) {
             ->where_not_equal('created_at', '0')
             ->select_expr('COUNT(*)', 'voucher_count')
             ->group_by('created_datetime')
-            ->order_by_desc('created_datetime')
-            ->find_array();
+            ->order_by_desc('created_datetime');
+        $createdate = Tenant::scopeIfTenant($createdate)->find_array();
 
         $ui->assign('createdate', $createdate);
 
@@ -740,6 +826,12 @@ switch ($action) {
         if (empty($type) || empty($plan) || empty($server) || empty($numbervoucher) || empty($lengthcode)) {
             $msg .= Lang::T('All fields are required') . '<br>';
         }
+        if (!empty($plan) && !fnp_plan_plan($plan)) {
+            $msg .= Lang::T('Plan not found') . '<br>';
+        }
+        if (!empty($server) && !fnp_plan_router_exists($server)) {
+            $msg .= Lang::T('Router not found for this tenant') . '<br>';
+        }
         if (!Validator::UnsignedNumber($numbervoucher)) {
             $msg .= 'The Number of Vouchers must be a number' . '<br>';
         }
@@ -750,15 +842,19 @@ switch ($action) {
         if ($msg == '') {
             // Update or create voucher prefix
             if (!empty($prefix)) {
-                $d = ORM::for_table('tbl_appconfig')->where('setting', 'voucher_prefix')->find_one();
-                if ($d) {
-                    $d->value = $prefix;
-                    $d->save();
+                if (Tenant::isTenantRequest()) {
+                    Tenant::saveSetting('voucher', 'prefix', $prefix, false);
                 } else {
-                    $d = ORM::for_table('tbl_appconfig')->create();
-                    $d->setting = 'voucher_prefix';
-                    $d->value = $prefix;
-                    $d->save();
+                    $d = ORM::for_table('tbl_appconfig')->where('setting', 'voucher_prefix')->find_one();
+                    if ($d) {
+                        $d->value = $prefix;
+                        $d->save();
+                    } else {
+                        $d = ORM::for_table('tbl_appconfig')->create();
+                        $d->setting = 'voucher_prefix';
+                        $d->value = $prefix;
+                        $d->save();
+                    }
                 }
             }
 
@@ -785,6 +881,7 @@ switch ($action) {
 
             foreach ($vouchers as $code) {
                 $d = ORM::for_table('tbl_voucher')->create();
+                Tenant::stamp($d, null, 'tbl_voucher');
                 $d->type = $type;
                 $d->routers = $server;
                 $d->id_plan = $plan;
@@ -802,8 +899,8 @@ switch ($action) {
 
                 $vouchersToPrint = ORM::for_table('tbl_voucher')
                     ->left_outer_join('tbl_plans', ['tbl_plans.id', '=', 'tbl_voucher.id_plan'])
-                    ->where_in('tbl_voucher.id', $newVoucherIds)
-                    ->find_many();
+                    ->where_in('tbl_voucher.id', $newVoucherIds);
+                $vouchersToPrint = Tenant::scopeIfTenant($vouchersToPrint, 'tbl_voucher')->find_many();
 
                 $voucherHtmls = [];
                 $n = 1;
@@ -856,9 +953,9 @@ switch ($action) {
                 $voucherIds = array_map('intval', $voucherIds);
 
                 try {
-                    ORM::for_table('tbl_voucher')
-                        ->where_in('id', $voucherIds)
-                        ->delete_many();
+                    $deleteQuery = ORM::for_table('tbl_voucher')
+                        ->where_in('id', $voucherIds);
+                    Tenant::scopeIfTenant($deleteQuery)->delete_many();
                 } catch (Exception $e) {
                     echo json_encode(['status' => 'error', 'message' => Lang::T('Failed to delete vouchers.')]);
                     exit;
@@ -879,7 +976,7 @@ switch ($action) {
     case 'voucher-view':
         $id = $routes[2];
         if (in_array($admin['user_type'], ['SuperAdmin', 'Admin'])) {
-            $voucher = ORM::for_table('tbl_voucher')->find_one($id);
+            $voucher = fnp_plan_voucher($id);
         } else {
             $sales = [];
             $sls = ORM::for_table('tbl_users')->select('id')->where('root', $admin['id'])->findArray();
@@ -887,16 +984,15 @@ switch ($action) {
                 $sales[] = $s['id'];
             }
             $sales[] = $admin['id'];
-            $voucher = ORM::for_table('tbl_voucher')
-                ->find_one($id);
-            if (!in_array($voucher['generated_by'], $sales)) {
+            $voucher = fnp_plan_voucher($id);
+            if (!$voucher || !in_array($voucher['generated_by'], $sales)) {
                 r2(getUrl('plan/voucher/'), 'e', Lang::T('Voucher Not Found'));
             }
         }
         if (!$voucher) {
             r2(getUrl('plan/voucher/'), 'e', Lang::T('Voucher Not Found'));
         }
-        $plan = ORM::for_table('tbl_plans')->find_one($voucher['id_plan']);
+        $plan = fnp_plan_plan($voucher['id_plan']);
         if ($voucher && $plan) {
             $content = Lang::pad($config['CompanyName'], ' ', 2) . "\n";
             $content .= Lang::pad($config['address'], ' ', 2) . "\n";
@@ -937,7 +1033,7 @@ switch ($action) {
         }
         $id = $routes['2'];
         run_hook('delete_voucher'); #HOOK
-        $d = ORM::for_table('tbl_voucher')->find_one($id);
+        $d = fnp_plan_voucher($id);
         if ($d) {
             $d->delete();
             r2(getUrl('plan/voucher'), 's', Lang::T('Data Deleted Successfully'));
@@ -960,16 +1056,21 @@ switch ($action) {
             _alert(Lang::T('You do not have permission to access this page'), 'danger', "dashboard");
         }
         $code = Text::alphanumeric(_post('code'), "-_.,");
-        $user = ORM::for_table('tbl_customers')->where('id', _post('id_customer'))->find_one();
-        $v1 = ORM::for_table('tbl_voucher')->whereRaw("BINARY code = '$code'")->where('status', 0)->find_one();
+        $user = fnp_plan_customer(_post('id_customer'));
+        $voucherQuery = ORM::for_table('tbl_voucher')->where_raw("BINARY code = ?", [$code])->where('status', 0);
+        $v1 = Tenant::scopeIfTenant($voucherQuery)->find_one();
 
         run_hook('refill_customer'); #HOOK
         if ($v1) {
+            if (!$user) {
+                r2(getUrl('plan/refill'), 'e', Lang::T('Customer not found'));
+            }
             if (Package::rechargeUser($user['id'], $v1['routers'], $v1['id_plan'], "Voucher", $code)) {
                 $v1->status = "1";
                 $v1->user = $user['username'];
                 $v1->save();
-                $in = ORM::for_table('tbl_transactions')->where('username', $user['username'])->order_by_desc('id')->find_one();
+                $inQuery = ORM::for_table('tbl_transactions')->where('username', $user['username'])->order_by_desc('id');
+                $in = Tenant::scopeIfTenant($inQuery)->find_one();
                 Package::createInvoice($in);
                 $ui->display('admin/plan/invoice.tpl');
             } else {
@@ -986,10 +1087,11 @@ switch ($action) {
         $ui->assign('_title', Lang::T('Refill Balance'));
         $ui->assign('xfooter', $select2_customer);
         if (in_array($admin['user_type'], ['SuperAdmin', 'Admin'])) {
-            $ui->assign('p', ORM::for_table('tbl_plans')->where('type', 'Balance')->find_many());
+            $planQuery = ORM::for_table('tbl_plans')->where('type', 'Balance');
         } else {
-            $ui->assign('p', ORM::for_table('tbl_plans')->where('enabled', '1')->where('type', 'Balance')->find_many());
+            $planQuery = ORM::for_table('tbl_plans')->where('enabled', '1')->where('type', 'Balance');
         }
+        $ui->assign('p', Tenant::scopeIfTenant($planQuery)->find_many());
         run_hook('view_deposit'); #HOOK
         $ui->display('admin/plan/deposit.tpl');
         break;
@@ -1002,9 +1104,12 @@ switch ($action) {
         $plan = _post('id_plan');
         $note = _post('note');
         $svoucher = _req('svoucher');
-        $c = ORM::for_table('tbl_customers')->find_one($user);
+        $c = fnp_plan_customer($user);
+        if (!$c) {
+            r2(getUrl('plan/refill'), 'e', Lang::T('Customer not found'));
+        }
         if (App::getVoucherValue($svoucher)) {
-            $in = ORM::for_table('tbl_transactions')->find_one(App::getVoucherValue($svoucher));
+            $in = fnp_plan_transaction(App::getVoucherValue($svoucher));
             Package::createInvoice($in);
             $ui->display('admin/plan/invoice.tpl');
             die();
@@ -1017,7 +1122,7 @@ switch ($action) {
             $plan['price'] = $amount;
             $trxId = Package::rechargeBalance($c, $plan, "Deposit", $admin['fullname'], $note);
             if ($trxId > 0) {
-                $in = ORM::for_table('tbl_transactions')->find_one($trxId);
+                $in = fnp_plan_transaction($trxId);
                 Package::createInvoice($in);
                 if (!empty($svoucher)) {
                     App::setVoucher($svoucher, $trxId);
@@ -1027,10 +1132,13 @@ switch ($action) {
                 r2(getUrl('plan/refill'), 'e', "Failed to refill account");
             }
         } else if (!empty($user) && !empty($plan)) {
-            $p = ORM::for_table('tbl_plans')->find_one($plan);
+            $p = fnp_plan_plan($plan);
+            if (!$p) {
+                r2(getUrl('plan/refill'), 'e', Lang::T('Plan not found'));
+            }
             $trxId = Package::rechargeBalance($c, $p, "Deposit", $admin['fullname'], $note);
             if ($trxId > 0) {
-                $in = ORM::for_table('tbl_transactions')->find_one($trxId);
+                $in = fnp_plan_transaction($trxId);
                 Package::createInvoice($in);
                 if (!empty($svoucher)) {
                     App::setVoucher($svoucher, $trxId);
@@ -1050,7 +1158,10 @@ switch ($action) {
         if (App::getVoucherValue($svoucher)) {
             r2(getUrl('plan'), 's', "Extend already done");
         }
-        $tur = ORM::for_table('tbl_user_recharges')->find_one($id);
+        $tur = fnp_plan_recharge($id);
+        if (!$tur) {
+            r2(getUrl('plan'), 'e', Lang::T('Account Not Found'));
+        }
         $status = $tur['status'];
         if ($status == 'off') {
             if (strtotime($tur['expiration'] . ' ' . $tur['time']) > time()) {
@@ -1061,9 +1172,9 @@ switch ($action) {
                 $expiration = date('Y-m-d', strtotime(" +$days day"));
             }
             App::setVoucher($svoucher, $id);
-            $c = ORM::for_table('tbl_customers')->findOne($tur['customer_id']);
+            $c = fnp_plan_customer($tur['customer_id']);
             if ($c) {
-                $p = ORM::for_table('tbl_plans')->find_one($tur['plan_id']);
+                $p = fnp_plan_plan($tur['plan_id']);
                 if ($p) {
                     $dvc = Package::getDevice($p);
                     if ($_app_stage != 'demo') {
@@ -1110,16 +1221,20 @@ switch ($action) {
         $ui->assign('status', $status);
         $ui->assign('router', $router);
         $ui->assign('search', $search);
-        $ui->assign('routers', array_column(ORM::for_table('tbl_user_recharges')->distinct()->select("routers")->whereNotEqual('routers', '')->findArray(), 'routers'));
+        $routersQuery = ORM::for_table('tbl_user_recharges')->distinct()->select("routers")->whereNotEqual('routers', '');
+        $ui->assign('routers', array_column(Tenant::scopeIfTenant($routersQuery)->findArray(), 'routers'));
 
-        $plns = ORM::for_table('tbl_user_recharges')->distinct()->select("plan_id")->findArray();
+        $plansUsedQuery = ORM::for_table('tbl_user_recharges')->distinct()->select("plan_id");
+        $plns = Tenant::scopeIfTenant($plansUsedQuery)->findArray();
         $ids = array_column($plns, 'plan_id');
         if (count($ids)) {
-            $ui->assign('plans', ORM::for_table('tbl_plans')->select("id")->select('name_plan')->where_id_in($ids)->findArray());
+            $activePlanQuery = ORM::for_table('tbl_plans')->select("id")->select('name_plan')->where_id_in($ids);
+            $ui->assign('plans', Tenant::scopeIfTenant($activePlanQuery)->findArray());
         } else {
             $ui->assign('plans', []);
         }
         $query = ORM::for_table('tbl_user_recharges')->order_by_desc('id');
+        $query = Tenant::scopeIfTenant($query);
 
         if ($search != '') {
             $query->where_like("username", "%$search%");

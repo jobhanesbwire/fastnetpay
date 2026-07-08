@@ -6,7 +6,8 @@ class graph_monthly_registered_customers
     {
         global $CACHE_PATH,$ui;
 
-        $cacheMRfile = $CACHE_PATH . File::pathFixer('/monthlyRegistered.temp');
+        $tenantCacheKey = class_exists('Tenant') ? ('tenant_' . Tenant::currentId()) : 'global';
+        $cacheMRfile = $CACHE_PATH . File::pathFixer('/monthlyRegistered_' . $tenantCacheKey . '.temp');
         //Compatibility for old path
         if (file_exists($oldCacheMRfile = str_replace($CACHE_PATH, '', $cacheMRfile))) {
             rename($oldCacheMRfile, $cacheMRfile);
@@ -20,8 +21,8 @@ class graph_monthly_registered_customers
                 ->select_expr('MONTH(created_at)', 'month')
                 ->select_expr('COUNT(*)', 'count')
                 ->where_raw('YEAR(created_at) = YEAR(NOW())')
-                ->group_by_expr('MONTH(created_at)')
-                ->find_many();
+                ->group_by_expr('MONTH(created_at)');
+            $result = Tenant::scopeIfTenant($result)->find_many();
 
             $monthlyRegistered = [];
             foreach ($result as $row) {

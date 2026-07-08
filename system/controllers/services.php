@@ -53,7 +53,9 @@ function fnp_sync_service_plan($plan)
         return fnp_sync_service_plan_to_router($plan, $routerName);
     }
 
-    $routers = ORM::for_table('tbl_routers')->where('enabled', '1')->find_many();
+    $routerQuery = ORM::for_table('tbl_routers')->where('enabled', '1');
+    $routerQuery = Tenant::scopeIfTenant($routerQuery);
+    $routers = $routerQuery->find_many();
     if (!$routers) {
         return 'FAILED : ' . $plan['name_plan'] . ' | No enabled routers found<br>';
     }
@@ -65,18 +67,47 @@ function fnp_sync_service_plan($plan)
     return $log;
 }
 
+function fnp_service_tenant_router_exists($routerName)
+{
+    $routerName = trim((string) $routerName);
+    if ($routerName === '' || $routerName === 'radius') {
+        return true;
+    }
+    $query = ORM::for_table('tbl_routers')->where('name', $routerName);
+    $query = Tenant::scopeIfTenant($query);
+    return (bool) $query->find_one();
+}
+
+function fnp_service_tenant_plan($id)
+{
+    return Tenant::scopeIfTenant(ORM::for_table('tbl_plans'))->find_one((int) $id);
+}
+
+function fnp_service_tenant_bandwidth($id = null)
+{
+    $query = Tenant::scopeIfTenant(ORM::for_table('tbl_bandwidth'));
+    if ($id !== null) {
+        $query->where('id', (int) $id);
+    }
+    return $query;
+}
+
 switch ($action) {
     case 'sync':
         set_time_limit(-1);
         if ($routes['2'] == 'hotspot') {
-            $plans = ORM::for_table('tbl_plans')->where('type', 'Hotspot')->find_many();
+            $planQuery = ORM::for_table('tbl_plans')->where('type', 'Hotspot');
+            $planQuery = Tenant::scopeIfTenant($planQuery);
+            $plans = $planQuery->find_many();
             $log = '';
             foreach ($plans as $plan) {
                 $log .= fnp_sync_service_plan($plan);
             }
             r2(getUrl('services/hotspot'), 's', $log);
         } else if ($routes['2'] == 'pppoe') {
-            $plans = ORM::for_table('tbl_plans')->where('type', 'PPPOE')->find_many();
+            $planQuery = ORM::for_table('tbl_plans')->where('type', 'PPPOE');
+            $planQuery = Tenant::scopeIfTenant($planQuery);
+            $plans = $planQuery->find_many();
             $log = '';
             foreach ($plans as $plan) {
                 $log .= fnp_sync_service_plan($plan);
@@ -112,7 +143,9 @@ switch ($action) {
             . "&status=" . urlencode($status)
             . "&router=" . urlencode($router);
 
-        $bws = ORM::for_table('tbl_plans')->distinct()->select("id_bw")->where('tbl_plans.type', 'Hotspot')->findArray();
+        $bwsQuery = ORM::for_table('tbl_plans')->distinct()->select("id_bw")->where('tbl_plans.type', 'Hotspot');
+        $bwsQuery = Tenant::scopeIfTenant($bwsQuery, 'tbl_plans');
+        $bws = $bwsQuery->findArray();
         $ids = array_column($bws, 'id_bw');
         if (count($ids)) {
             $ui->assign('bws', ORM::for_table('tbl_bandwidth')->select("id")->select('name_bw')->where_id_in($ids)->findArray());
@@ -122,7 +155,9 @@ switch ($action) {
         $ui->assign('type2s', ORM::for_table('tbl_plans')->getEnum("plan_type"));
         $ui->assign('type3s', ORM::for_table('tbl_plans')->getEnum("typebp"));
         $ui->assign('valids', ORM::for_table('tbl_plans')->getEnum("validity_unit"));
-        $ui->assign('routers', array_column(ORM::for_table('tbl_plans')->distinct()->select("routers")->where('tbl_plans.type', 'Hotspot')->whereNotEqual('routers', '')->findArray(), 'routers'));
+        $routerNamesQuery = ORM::for_table('tbl_plans')->distinct()->select("routers")->where('tbl_plans.type', 'Hotspot')->whereNotEqual('routers', '');
+        $routerNamesQuery = Tenant::scopeIfTenant($routerNamesQuery, 'tbl_plans');
+        $ui->assign('routers', array_column($routerNamesQuery->findArray(), 'routers'));
         $devices = [];
         $files = scandir($DEVICE_PATH);
         foreach ($files as $file) {
@@ -135,6 +170,7 @@ switch ($action) {
         $query = ORM::for_table('tbl_bandwidth')
             ->left_outer_join('tbl_plans', array('tbl_bandwidth.id', '=', 'tbl_plans.id_bw'))
             ->where('tbl_plans.type', 'Hotspot');
+        $query = Tenant::scopeIfTenant($query, 'tbl_plans');
 
         if (!empty($type1)) {
             $query->where('tbl_plans.prepaid', $type1);
@@ -173,9 +209,11 @@ switch ($action) {
         $ui->display('admin/hotspot/list.tpl');
         break;
     case 'add':
-        $d = ORM::for_table('tbl_bandwidth')->find_many();
+        $bandwidthQuery = Tenant::scopeIfTenant(ORM::for_table('tbl_bandwidth'));
+        $d = $bandwidthQuery->find_many();
         $ui->assign('d', $d);
-        $r = ORM::for_table('tbl_routers')->find_many();
+        $routerQuery = Tenant::scopeIfTenant(ORM::for_table('tbl_routers'));
+        $r = $routerQuery->find_many();
         $ui->assign('r', $r);
         $devices = [];
         $files = scandir($DEVICE_PATH);
@@ -192,7 +230,7 @@ switch ($action) {
 
     case 'edit':
         $id = $routes['2'];
-        $d = ORM::for_table('tbl_plans')->find_one($id);
+        $d = fnp_service_tenant_plan($id);
         if ($d) {
             if (empty($d['device'])) {
                 if ($d['is_radius']) {
@@ -203,7 +241,7 @@ switch ($action) {
                 $d->save();
             }
             $ui->assign('d', $d);
-            $b = ORM::for_table('tbl_bandwidth')->find_many();
+            $b = fnp_service_tenant_bandwidth()->find_many();
             $ui->assign('b', $b);
             $devices = [];
             $files = scandir($DEVICE_PATH);
@@ -216,10 +254,11 @@ switch ($action) {
             $ui->assign('devices', $devices);
             //select expired plan
             if ($d['is_radius']) {
-                $exps = ORM::for_table('tbl_plans')->selects('id', 'name_plan')->where('type', 'Hotspot')->where("is_radius", 1)->findArray();
+                $expsQuery = ORM::for_table('tbl_plans')->selects('id', 'name_plan')->where('type', 'Hotspot')->where("is_radius", 1);
             } else {
-                $exps = ORM::for_table('tbl_plans')->selects('id', 'name_plan')->where('type', 'Hotspot')->where("routers", $d['routers'])->findArray();
+                $expsQuery = ORM::for_table('tbl_plans')->selects('id', 'name_plan')->where('type', 'Hotspot')->where("routers", $d['routers']);
             }
+            $exps = Tenant::scopeIfTenant($expsQuery)->findArray();
             $ui->assign('exps', $exps);
             run_hook('view_edit_plan'); #HOOK
             $ui->display('admin/hotspot/edit.tpl');
@@ -231,7 +270,7 @@ switch ($action) {
     case 'delete':
         $id = $routes['2'];
 
-        $d = ORM::for_table('tbl_plans')->find_one($id);
+        $d = fnp_service_tenant_plan($id);
         if ($d) {
             run_hook('delete_plan'); #HOOK
             $dvc = Package::getDevice($d);
@@ -283,9 +322,13 @@ switch ($action) {
         if (empty($radius)) {
             if ($routers == '') {
                 $msg .= Lang::T('All field is required') . '<br>';
+            } else if (!fnp_service_tenant_router_exists($routers)) {
+                $msg .= Lang::T('Router not found for this tenant') . '<br>';
             }
         }
-        $d = ORM::for_table('tbl_plans')->where('name_plan', $name)->where('type', 'Hotspot')->find_one();
+        $duplicateQuery = ORM::for_table('tbl_plans')->where('name_plan', $name)->where('type', 'Hotspot');
+        $duplicateQuery = Tenant::scopeIfTenant($duplicateQuery);
+        $d = $duplicateQuery->find_one();
         if ($d) {
             $msg .= Lang::T('Name Plan Already Exist') . '<br>';
         }
@@ -295,6 +338,7 @@ switch ($action) {
         if ($msg == '') {
             // Create new plan
             $d = ORM::for_table('tbl_plans')->create();
+            Tenant::stamp($d, null, 'tbl_plans');
             $d->name_plan = $name;
             $d->id_bw = $id_bw;
             $d->price = $price; // Set price with or without tax based on configuration
@@ -379,8 +423,8 @@ switch ($action) {
         if ($name == '' or $id_bw == '' or $price == '' or $validity == '') {
             $msg .= Lang::T('All field is required') . '<br>';
         }
-        $d = ORM::for_table('tbl_plans')->where('id', $id)->find_one();
-        $old = ORM::for_table('tbl_plans')->where('id', $id)->find_one();
+        $d = fnp_service_tenant_plan($id);
+        $old = fnp_service_tenant_plan($id);
         if ($d) {
         } else {
             $msg .= Lang::T('Data Not Found') . '<br>';
@@ -392,7 +436,10 @@ switch ($action) {
 
         run_hook('edit_plan'); #HOOK
         if ($msg == '') {
-            $b = ORM::for_table('tbl_bandwidth')->where('id', $id_bw)->find_one();
+            $b = fnp_service_tenant_bandwidth($id_bw)->find_one();
+            if (!$b) {
+                r2(getUrl('services/edit/') . $id, 'e', Lang::T('Bandwidth profile not found'));
+            }
             if ($b['rate_down_unit'] == 'Kbps') {
                 $unitdown = 'K';
                 $raddown = '000';
@@ -488,7 +535,9 @@ switch ($action) {
             . "&status=" . urlencode($status)
             . "&router=" . urlencode($router);
 
-        $bws = ORM::for_table('tbl_plans')->distinct()->select("id_bw")->where('tbl_plans.type', 'PPPOE')->findArray();
+        $bwsQuery = ORM::for_table('tbl_plans')->distinct()->select("id_bw")->where('tbl_plans.type', 'PPPOE');
+        $bwsQuery = Tenant::scopeIfTenant($bwsQuery, 'tbl_plans');
+        $bws = $bwsQuery->findArray();
         $ids = array_column($bws, 'id_bw');
         if (count($ids)) {
             $ui->assign('bws', ORM::for_table('tbl_bandwidth')->select("id")->select('name_bw')->where_id_in($ids)->findArray());
@@ -498,7 +547,9 @@ switch ($action) {
         $ui->assign('type2s', ORM::for_table('tbl_plans')->getEnum("plan_type"));
         $ui->assign('type3s', ORM::for_table('tbl_plans')->getEnum("typebp"));
         $ui->assign('valids', ORM::for_table('tbl_plans')->getEnum("validity_unit"));
-        $ui->assign('routers', array_column(ORM::for_table('tbl_plans')->distinct()->select("routers")->whereNotEqual('routers', '')->findArray(), 'routers'));
+        $routerNamesQuery = ORM::for_table('tbl_plans')->distinct()->select("routers")->whereNotEqual('routers', '');
+        $routerNamesQuery = Tenant::scopeIfTenant($routerNamesQuery, 'tbl_plans');
+        $ui->assign('routers', array_column($routerNamesQuery->findArray(), 'routers'));
         $devices = [];
         $files = scandir($DEVICE_PATH);
         foreach ($files as $file) {
@@ -511,6 +562,7 @@ switch ($action) {
         $query = ORM::for_table('tbl_bandwidth')
             ->left_outer_join('tbl_plans', array('tbl_bandwidth.id', '=', 'tbl_plans.id_bw'))
             ->where('tbl_plans.type', 'PPPOE');
+        $query = Tenant::scopeIfTenant($query, 'tbl_plans');
         if (!empty($type1)) {
             $query->where('tbl_plans.prepaid', $type1);
         }
@@ -551,9 +603,11 @@ switch ($action) {
 
     case 'pppoe-add':
         $ui->assign('_title', Lang::T('PPPOE Plans'));
-        $d = ORM::for_table('tbl_bandwidth')->find_many();
+        $bandwidthQuery = Tenant::scopeIfTenant(ORM::for_table('tbl_bandwidth'));
+        $d = $bandwidthQuery->find_many();
         $ui->assign('d', $d);
-        $r = ORM::for_table('tbl_routers')->find_many();
+        $routerQuery = Tenant::scopeIfTenant(ORM::for_table('tbl_routers'));
+        $r = $routerQuery->find_many();
         $ui->assign('r', $r);
         $devices = [];
         $files = scandir($DEVICE_PATH);
@@ -571,7 +625,7 @@ switch ($action) {
     case 'pppoe-edit':
         $ui->assign('_title', Lang::T('PPPOE Plans'));
         $id = $routes['2'];
-        $d = ORM::for_table('tbl_plans')->find_one($id);
+        $d = fnp_service_tenant_plan($id);
         if ($d) {
             if (empty($d['device'])) {
                 if ($d['is_radius']) {
@@ -582,13 +636,16 @@ switch ($action) {
                 $d->save();
             }
             $ui->assign('d', $d);
-            $p = ORM::for_table('tbl_pool')->where('routers', ($d['is_radius']) ? 'radius' : $d['routers'])->find_many();
+            $poolQuery = ORM::for_table('tbl_pool')->where('routers', ($d['is_radius']) ? 'radius' : $d['routers']);
+            $poolQuery = Tenant::scopeIfTenant($poolQuery);
+            $p = $poolQuery->find_many();
             $ui->assign('p', $p);
-            $b = ORM::for_table('tbl_bandwidth')->find_many();
+            $b = fnp_service_tenant_bandwidth()->find_many();
             $ui->assign('b', $b);
             $r = [];
             if ($d['is_radius']) {
-                $r = ORM::for_table('tbl_routers')->find_many();
+                $routerQuery = Tenant::scopeIfTenant(ORM::for_table('tbl_routers'));
+                $r = $routerQuery->find_many();
             }
             $ui->assign('r', $r);
             $devices = [];
@@ -602,10 +659,11 @@ switch ($action) {
             $ui->assign('devices', $devices);
             //select expired plan
             if ($d['is_radius']) {
-                $exps = ORM::for_table('tbl_plans')->selects('id', 'name_plan')->where('type', 'PPPOE')->where("is_radius", 1)->findArray();
+                $expsQuery = ORM::for_table('tbl_plans')->selects('id', 'name_plan')->where('type', 'PPPOE')->where("is_radius", 1);
             } else {
-                $exps = ORM::for_table('tbl_plans')->selects('id', 'name_plan')->where('type', 'PPPOE')->where("routers", $d['routers'])->findArray();
+                $expsQuery = ORM::for_table('tbl_plans')->selects('id', 'name_plan')->where('type', 'PPPOE')->where("routers", $d['routers']);
             }
+            $exps = Tenant::scopeIfTenant($expsQuery)->findArray();
             $ui->assign('exps', $exps);
             run_hook('view_edit_ppoe'); #HOOK
             $ui->display('admin/pppoe/edit.tpl');
@@ -617,7 +675,7 @@ switch ($action) {
     case 'pppoe-delete':
         $id = $routes['2'];
 
-        $d = ORM::for_table('tbl_plans')->find_one($id);
+        $d = fnp_service_tenant_plan($id);
         if ($d) {
             run_hook('delete_ppoe'); #HOOK
 
@@ -665,16 +723,23 @@ switch ($action) {
         if (empty($radius)) {
             if ($routers == '') {
                 $msg .= Lang::T('All field is required') . '<br>';
+            } else if (!fnp_service_tenant_router_exists($routers)) {
+                $msg .= Lang::T('Router not found for this tenant') . '<br>';
             }
         }
 
-        $d = ORM::for_table('tbl_plans')->where('name_plan', $name)->find_one();
+        $duplicateQuery = ORM::for_table('tbl_plans')->where('name_plan', $name);
+        $duplicateQuery = Tenant::scopeIfTenant($duplicateQuery);
+        $d = $duplicateQuery->find_one();
         if ($d) {
             $msg .= Lang::T('Name Plan Already Exist') . '<br>';
         }
         run_hook('add_ppoe'); #HOOK
         if ($msg == '') {
-            $b = ORM::for_table('tbl_bandwidth')->where('id', $id_bw)->find_one();
+            $b = fnp_service_tenant_bandwidth($id_bw)->find_one();
+            if (!$b) {
+                r2(getUrl('services/pppoe-add'), 'e', Lang::T('Bandwidth profile not found'));
+            }
             if ($b['rate_down_unit'] == 'Kbps') {
                 $unitdown = 'K';
                 $raddown = '000';
@@ -693,6 +758,7 @@ switch ($action) {
             $radiusRate = $b['rate_up'] . $radup . '/' . $b['rate_down'] . $raddown . '/' . $b['burst'];
             $rate = trim($rate . " " . $b['burst']);
             $d = ORM::for_table('tbl_plans')->create();
+            Tenant::stamp($d, null, 'tbl_plans');
             $d->type = 'PPPOE';
             $d->name_plan = $name;
             $d->id_bw = $id_bw;
@@ -765,20 +831,26 @@ switch ($action) {
         if ($name == '' or $id_bw == '' or $price == '' or $validity == '' or $pool == '') {
             $msg .= Lang::T('All field is required') . '<br>';
         }
+        if ($routers !== '' && !fnp_service_tenant_router_exists($routers)) {
+            $msg .= Lang::T('Router not found for this tenant') . '<br>';
+        }
 
         if ($price_old <= $price) {
             $price_old = '';
         }
 
-        $d = ORM::for_table('tbl_plans')->where('id', $id)->find_one();
-        $old = ORM::for_table('tbl_plans')->where('id', $id)->find_one();
+        $d = fnp_service_tenant_plan($id);
+        $old = fnp_service_tenant_plan($id);
         if ($d) {
         } else {
             $msg .= Lang::T('Data Not Found') . '<br>';
         }
         run_hook('edit_ppoe'); #HOOK
         if ($msg == '') {
-            $b = ORM::for_table('tbl_bandwidth')->where('id', $id_bw)->find_one();
+            $b = fnp_service_tenant_bandwidth($id_bw)->find_one();
+            if (!$b) {
+                r2(getUrl('services/pppoe-edit/') . $id, 'e', Lang::T('Bandwidth profile not found'));
+            }
             if ($b['rate_down_unit'] == 'Kbps') {
                 $unitdown = 'K';
                 $raddown = '000';
@@ -841,9 +913,11 @@ switch ($action) {
         $name = _post('name');
         if ($name != '') {
             $query = ORM::for_table('tbl_plans')->where('tbl_plans.type', 'Balance')->where_like('tbl_plans.name_plan', '%' . $name . '%');
+            $query = Tenant::scopeIfTenant($query, 'tbl_plans');
             $d = Paginator::findMany($query, ['name' => $name]);
         } else {
             $query = ORM::for_table('tbl_plans')->where('tbl_plans.type', 'Balance');
+            $query = Tenant::scopeIfTenant($query, 'tbl_plans');
             $d = Paginator::findMany($query);
         }
 
@@ -859,7 +933,7 @@ switch ($action) {
     case 'balance-edit':
         $ui->assign('_title', Lang::T('Balance Plans'));
         $id = $routes['2'];
-        $d = ORM::for_table('tbl_plans')->find_one($id);
+        $d = fnp_service_tenant_plan($id);
         $ui->assign('d', $d);
         run_hook('view_edit_balance'); #HOOK
         $ui->display('admin/balance/edit.tpl');
@@ -867,7 +941,7 @@ switch ($action) {
     case 'balance-delete':
         $id = $routes['2'];
 
-        $d = ORM::for_table('tbl_plans')->find_one($id);
+        $d = fnp_service_tenant_plan($id);
         if ($d) {
             run_hook('delete_balance'); #HOOK
             $d->delete();
@@ -890,7 +964,7 @@ switch ($action) {
             $msg .= Lang::T('All field is required') . '<br>';
         }
 
-        $d = ORM::for_table('tbl_plans')->where('id', $id)->find_one();
+        $d = fnp_service_tenant_plan($id);
         if ($d) {
         } else {
             $msg .= Lang::T('Data Not Found') . '<br>';
@@ -925,13 +999,16 @@ switch ($action) {
             $msg .= Lang::T('All field is required') . '<br>';
         }
 
-        $d = ORM::for_table('tbl_plans')->where('name_plan', $name)->find_one();
+        $duplicateQuery = ORM::for_table('tbl_plans')->where('name_plan', $name);
+        $duplicateQuery = Tenant::scopeIfTenant($duplicateQuery);
+        $d = $duplicateQuery->find_one();
         if ($d) {
             $msg .= Lang::T('Name Plan Already Exist') . '<br>';
         }
         run_hook('add_ppoe'); #HOOK
         if ($msg == '') {
             $d = ORM::for_table('tbl_plans')->create();
+            Tenant::stamp($d, null, 'tbl_plans');
             $d->type = 'Balance';
             $d->name_plan = $name;
             $d->id_bw = 0;
@@ -980,7 +1057,9 @@ switch ($action) {
             . "&status=" . urlencode($status)
             . "&router=" . urlencode($router);
 
-        $bws = ORM::for_table('tbl_plans')->distinct()->select("id_bw")->where('tbl_plans.type', 'VPN')->findArray();
+        $bwsQuery = ORM::for_table('tbl_plans')->distinct()->select("id_bw")->where('tbl_plans.type', 'VPN');
+        $bwsQuery = Tenant::scopeIfTenant($bwsQuery, 'tbl_plans');
+        $bws = $bwsQuery->findArray();
         $ids = array_column($bws, 'id_bw');
         if (count($ids)) {
             $ui->assign('bws', ORM::for_table('tbl_bandwidth')->select("id")->select('name_bw')->where_id_in($ids)->findArray());
@@ -990,7 +1069,9 @@ switch ($action) {
         $ui->assign('type2s', ORM::for_table('tbl_plans')->getEnum("plan_type"));
         $ui->assign('type3s', ORM::for_table('tbl_plans')->getEnum("typebp"));
         $ui->assign('valids', ORM::for_table('tbl_plans')->getEnum("validity_unit"));
-        $ui->assign('routers', array_column(ORM::for_table('tbl_plans')->distinct()->select("routers")->whereNotEqual('routers', '')->findArray(), 'routers'));
+        $routerNamesQuery = ORM::for_table('tbl_plans')->distinct()->select("routers")->whereNotEqual('routers', '');
+        $routerNamesQuery = Tenant::scopeIfTenant($routerNamesQuery, 'tbl_plans');
+        $ui->assign('routers', array_column($routerNamesQuery->findArray(), 'routers'));
         $devices = [];
         $files = scandir($DEVICE_PATH);
         foreach ($files as $file) {
@@ -1003,6 +1084,7 @@ switch ($action) {
         $query = ORM::for_table('tbl_bandwidth')
             ->left_outer_join('tbl_plans', array('tbl_bandwidth.id', '=', 'tbl_plans.id_bw'))
             ->where('tbl_plans.type', 'VPN');
+        $query = Tenant::scopeIfTenant($query, 'tbl_plans');
         if (!empty($type1)) {
             $query->where('tbl_plans.prepaid', $type1);
         }
@@ -1043,9 +1125,11 @@ switch ($action) {
 
     case 'vpn-add':
         $ui->assign('_title', Lang::T('VPN Plans'));
-        $d = ORM::for_table('tbl_bandwidth')->find_many();
+        $bandwidthQuery = Tenant::scopeIfTenant(ORM::for_table('tbl_bandwidth'));
+        $d = $bandwidthQuery->find_many();
         $ui->assign('d', $d);
-        $r = ORM::for_table('tbl_routers')->find_many();
+        $routerQuery = Tenant::scopeIfTenant(ORM::for_table('tbl_routers'));
+        $r = $routerQuery->find_many();
         $ui->assign('r', $r);
         $devices = [];
         $files = scandir($DEVICE_PATH);
@@ -1063,7 +1147,7 @@ switch ($action) {
     case 'vpn-edit':
         $ui->assign('_title', Lang::T('VPN Plans'));
         $id = $routes['2'];
-        $d = ORM::for_table('tbl_plans')->find_one($id);
+        $d = Tenant::scopeIfTenant(ORM::for_table('tbl_plans'))->find_one($id);
         if ($d) {
             if (empty($d['device'])) {
                 if ($d['is_radius']) {
@@ -1074,13 +1158,17 @@ switch ($action) {
                 $d->save();
             }
             $ui->assign('d', $d);
-            $p = ORM::for_table('tbl_pool')->where('routers', ($d['is_radius']) ? 'radius' : $d['routers'])->find_many();
+            $poolQuery = ORM::for_table('tbl_pool')->where('routers', ($d['is_radius']) ? 'radius' : $d['routers']);
+            $poolQuery = Tenant::scopeIfTenant($poolQuery);
+            $p = $poolQuery->find_many();
             $ui->assign('p', $p);
-            $b = ORM::for_table('tbl_bandwidth')->find_many();
+            $bandwidthQuery = Tenant::scopeIfTenant(ORM::for_table('tbl_bandwidth'));
+            $b = $bandwidthQuery->find_many();
             $ui->assign('b', $b);
             $r = [];
             if ($d['is_radius']) {
-                $r = ORM::for_table('tbl_routers')->find_many();
+                $routerQuery = Tenant::scopeIfTenant(ORM::for_table('tbl_routers'));
+                $r = $routerQuery->find_many();
             }
             $ui->assign('r', $r);
             $devices = [];
@@ -1094,10 +1182,11 @@ switch ($action) {
             $ui->assign('devices', $devices);
             //select expired plan
             if ($d['is_radius']) {
-                $exps = ORM::for_table('tbl_plans')->selects('id', 'name_plan')->where('type', 'VPN')->where("is_radius", 1)->findArray();
+                $expsQuery = ORM::for_table('tbl_plans')->selects('id', 'name_plan')->where('type', 'VPN')->where("is_radius", 1);
             } else {
-                $exps = ORM::for_table('tbl_plans')->selects('id', 'name_plan')->where('type', 'VPN')->where("routers", $d['routers'])->findArray();
+                $expsQuery = ORM::for_table('tbl_plans')->selects('id', 'name_plan')->where('type', 'VPN')->where("routers", $d['routers']);
             }
+            $exps = Tenant::scopeIfTenant($expsQuery)->findArray();
             $ui->assign('exps', $exps);
             run_hook('view_edit_vpn'); #HOOK
             $ui->display('admin/vpn/edit.tpl');
@@ -1109,7 +1198,7 @@ switch ($action) {
     case 'vpn-delete':
         $id = $routes['2'];
 
-        $d = ORM::for_table('tbl_plans')->find_one($id);
+        $d = Tenant::scopeIfTenant(ORM::for_table('tbl_plans'))->find_one($id);
         if ($d) {
             run_hook('delete_vpn'); #HOOK
 
@@ -1157,16 +1246,23 @@ switch ($action) {
         if (empty($radius)) {
             if ($routers == '') {
                 $msg .= Lang::T('All field is required') . '<br>';
+            } else if (!fnp_service_tenant_router_exists($routers)) {
+                $msg .= Lang::T('Router not found for this tenant') . '<br>';
             }
         }
 
-        $d = ORM::for_table('tbl_plans')->where('name_plan', $name)->find_one();
+        $duplicateQuery = ORM::for_table('tbl_plans')->where('name_plan', $name);
+        $duplicateQuery = Tenant::scopeIfTenant($duplicateQuery);
+        $d = $duplicateQuery->find_one();
         if ($d) {
             $msg .= Lang::T('Name Plan Already Exist') . '<br>';
         }
         run_hook('add_vpn'); #HOOK
         if ($msg == '') {
-            $b = ORM::for_table('tbl_bandwidth')->where('id', $id_bw)->find_one();
+            $b = fnp_service_tenant_bandwidth($id_bw)->find_one();
+            if (!$b) {
+                r2(getUrl('services/vpn-add'), 'e', Lang::T('Bandwidth profile not found'));
+            }
             if ($b['rate_down_unit'] == 'Kbps') {
                 $unitdown = 'K';
                 $raddown = '000';
@@ -1185,6 +1281,7 @@ switch ($action) {
             $radiusRate = $b['rate_up'] . $radup . '/' . $b['rate_down'] . $raddown . '/' . $b['burst'];
             $rate = trim($rate . " " . $b['burst']);
             $d = ORM::for_table('tbl_plans')->create();
+            Tenant::stamp($d, null, 'tbl_plans');
             $d->type = 'VPN';
             $d->name_plan = $name;
             $d->id_bw = $id_bw;
@@ -1257,20 +1354,26 @@ switch ($action) {
         if ($name == '' or $id_bw == '' or $price == '' or $validity == '' or $pool == '') {
             $msg .= Lang::T('All field is required') . '<br>';
         }
+        if ($routers !== '' && !fnp_service_tenant_router_exists($routers)) {
+            $msg .= Lang::T('Router not found for this tenant') . '<br>';
+        }
 
         if($price_old<=$price){
             $price_old = '';
         }
 
-        $d = ORM::for_table('tbl_plans')->where('id', $id)->find_one();
-        $old = ORM::for_table('tbl_plans')->where('id', $id)->find_one();
+        $d = fnp_service_tenant_plan($id);
+        $old = fnp_service_tenant_plan($id);
         if ($d) {
         } else {
             $msg .= Lang::T('Data Not Found') . '<br>';
         }
         run_hook('edit_vpn'); #HOOK
         if ($msg == '') {
-            $b = ORM::for_table('tbl_bandwidth')->where('id', $id_bw)->find_one();
+            $b = fnp_service_tenant_bandwidth($id_bw)->find_one();
+            if (!$b) {
+                r2(getUrl('services/vpn-edit/') . $id, 'e', Lang::T('Bandwidth profile not found'));
+            }
             if ($b['rate_down_unit'] == 'Kbps') {
                 $unitdown = 'K';
                 $raddown = '000';

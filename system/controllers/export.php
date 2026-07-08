@@ -24,14 +24,36 @@ $before_30_days = date('Y-m-d', strtotime('today - 30 days'));
 //this month
 $month_n = date('n');
 
+function fnp_export_distinct_transactions($column)
+{
+    $allowed = ['method', 'routers', 'plan_name'];
+    if (!in_array($column, $allowed, true)) {
+        return [];
+    }
+    $query = ORM::for_table('tbl_transactions')->select($column)->distinct($column)->where_not_equal($column, '');
+    $query = Tenant::scopeIfTenant($query);
+    $values = [];
+    foreach ($query->find_array() as $row) {
+        if ($column === 'method') {
+            $method = trim((string) explode(' - ', $row[$column])[0]);
+            if ($method !== '') {
+                $values[$method] = $method;
+            }
+        } else {
+            $values[] = $row[$column];
+        }
+    }
+    return array_values($values);
+}
+
 switch ($action) {
 
     case 'print-by-date':
         $mdate = date('Y-m-d');
         $types = ORM::for_table('tbl_transactions')->getEnum('type');
-        $methods = array_column(ORM::for_table('tbl_transactions')->rawQuery("SELECT DISTINCT SUBSTRING_INDEX(`method`, ' - ', 1) as method FROM tbl_transactions;")->findArray(), 'method');
-        $routers = array_column(ORM::for_table('tbl_transactions')->select('routers')->distinct('routers')->find_array(), 'routers');
-        $plans = array_column(ORM::for_table('tbl_transactions')->select('plan_name')->distinct('plan_name')->find_array(), 'plan_name');
+        $methods = fnp_export_distinct_transactions('method');
+        $routers = fnp_export_distinct_transactions('routers');
+        $plans = fnp_export_distinct_transactions('plan_name');
         $reset_day = $config['reset_day'];
         if (empty($reset_day)) {
             $reset_day = 1;
@@ -55,6 +77,7 @@ switch ($action) {
             ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) >= " . strtotime("$sd $ts"))
             ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) <= " . strtotime("$ed $te"))
             ->order_by_desc('id');
+        $query = Tenant::scopeIfTenant($query);
         if (count($tps) > 0) {
             $query->where_in('type', $tps);
         }
@@ -89,9 +112,9 @@ switch ($action) {
     case 'pdf-by-date':
         $mdate = date('Y-m-d');
         $types = ORM::for_table('tbl_transactions')->getEnum('type');
-        $methods = array_column(ORM::for_table('tbl_transactions')->rawQuery("SELECT DISTINCT SUBSTRING_INDEX(`method`, ' - ', 1) as method FROM tbl_transactions;")->findArray(), 'method');
-        $routers = array_column(ORM::for_table('tbl_transactions')->select('routers')->distinct('routers')->find_array(), 'routers');
-        $plans = array_column(ORM::for_table('tbl_transactions')->select('plan_name')->distinct('plan_name')->find_array(), 'plan_name');
+        $methods = fnp_export_distinct_transactions('method');
+        $routers = fnp_export_distinct_transactions('routers');
+        $plans = fnp_export_distinct_transactions('plan_name');
         $reset_day = $config['reset_day'];
         if (empty($reset_day)) {
             $reset_day = 1;
@@ -115,6 +138,7 @@ switch ($action) {
             ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) >= " . strtotime("$sd $ts"))
             ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) <= " . strtotime("$ed $te"))
             ->order_by_desc('id');
+        $query = Tenant::scopeIfTenant($query);
         if (count($tps) > 0) {
             $query->where_in('type', $tps);
         }
@@ -258,6 +282,7 @@ EOF;
         $stype = _post('stype');
 
         $d = ORM::for_table('tbl_transactions');
+        $d = Tenant::scopeIfTenant($d);
         if ($stype != '') {
             $d->where('type', $stype);
         }
@@ -267,6 +292,7 @@ EOF;
         $x =  $d->find_many();
 
         $dr = ORM::for_table('tbl_transactions');
+        $dr = Tenant::scopeIfTenant($dr);
         if ($stype != '') {
             $dr->where('type', $stype);
         }
@@ -290,6 +316,7 @@ EOF;
         $tdate = _post('tdate');
         $stype = _post('stype');
         $d = ORM::for_table('tbl_transactions');
+        $d = Tenant::scopeIfTenant($d);
         if ($stype != '') {
             $d->where('type', $stype);
         }
@@ -300,6 +327,7 @@ EOF;
         $x =  $d->find_many();
 
         $dr = ORM::for_table('tbl_transactions');
+        $dr = Tenant::scopeIfTenant($dr);
         if ($stype != '') {
             $dr->where('type', $stype);
         }

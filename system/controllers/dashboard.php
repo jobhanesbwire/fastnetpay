@@ -62,5 +62,13 @@ for ($i = 0; $i < $count; $i++) {
 }
 
 $ui->assign('widgets', $widgets);
+$ui->assign('expiry_health', ExpiryWorker::health($UPLOAD_PATH));
+if (($admin['user_type'] ?? '') === 'SuperAdmin' && class_exists('SaasBilling')) {
+    try {
+        $ui->assign('saas_analytics', SaasBilling::analytics());
+    } catch (Throwable $e) {
+        $ui->assign('saas_analytics_error', $e->getMessage());
+    }
+}
 run_hook('view_dashboard'); #HOOK
 $ui->display('admin/dashboard.tpl');
