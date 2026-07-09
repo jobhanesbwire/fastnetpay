@@ -16,9 +16,14 @@ class RouterProvisioning
 {
     const API_USERNAME = 'fastnet-api-usr';
     const API_GROUP = 'fastnet-api';
+    const SCHEMA_VERSION = '2026-07-09-perf1';
 
     public static function installSchema()
     {
+        if (class_exists('FastnetpayRuntime') && FastnetpayRuntime::schemaFresh('router_provisioning', self::SCHEMA_VERSION, 86400)) {
+            return;
+        }
+
         ORM::raw_execute("CREATE TABLE IF NOT EXISTS router_provisioning_runs (
             id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
             router_id INT UNSIGNED NULL,
@@ -119,6 +124,9 @@ class RouterProvisioning
 
         self::seedTemplates();
         self::seedSamplePackages();
+        if (class_exists('FastnetpayRuntime')) {
+            FastnetpayRuntime::markSchemaFresh('router_provisioning', self::SCHEMA_VERSION);
+        }
     }
 
     private static function ensureColumn($table, $column, $definition)

@@ -14,6 +14,8 @@ class Tenant
     private static $mode = 'main';
     private static $columnCache = [];
     private static $tenantCache = [];
+    private static $settingsCache = [];
+    const SCHEMA_VERSION = '2026-07-09-perf1';
 
     public static function boot(&$config = [])
     {
@@ -34,6 +36,10 @@ class Tenant
 
     public static function installSchema()
     {
+        if (class_exists('FastnetpayRuntime') && FastnetpayRuntime::schemaFresh('tenant', self::SCHEMA_VERSION, 86400)) {
+            return;
+        }
+
         ORM::raw_execute("CREATE TABLE IF NOT EXISTS tenants (
             id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
             name VARCHAR(160) NOT NULL,
@@ -180,14 +186,25 @@ class Tenant
         }
         self::ensureIndex('tbl_routers', 'idx_tenant_status', ['tenant_id', 'status']);
         self::ensureIndex('tbl_customers', 'idx_tenant_status', ['tenant_id', 'status']);
+        self::ensureIndex('tbl_customers', 'idx_tenant_username', ['tenant_id', 'username']);
+        self::ensureIndex('tbl_customers', 'idx_tenant_phone', ['tenant_id', 'phonenumber']);
         self::ensureIndex('tbl_transactions', 'idx_tenant_recharged', ['tenant_id', 'recharged_on']);
         self::ensureIndex('tbl_payment_gateway', 'idx_tenant_status_date', ['tenant_id', 'status', 'created_date']);
+        self::ensureIndex('tbl_payment_gateway', 'idx_tenant_gateway_status', ['tenant_id', 'gateway', 'status']);
+        self::ensureIndex('tbl_payment_gateway', 'idx_gateway_trx', ['gateway_trx_id']);
         self::ensureIndex('tbl_user_recharges', 'idx_tenant_status_type_expiry', ['tenant_id', 'status', 'type', 'expiration']);
+        self::ensureIndex('tbl_user_recharges', 'idx_tenant_customer_expiry', ['tenant_id', 'customer_id', 'expiration']);
+        self::ensureIndex('jovipay_transactions', 'idx_tenant_reference', ['tenant_id', 'account_reference']);
+        self::ensureIndex('jovipay_transactions', 'idx_tenant_status', ['tenant_id', 'status']);
+        self::ensureIndex('jovipay_transactions', 'idx_receipt_status', ['mpesa_receipt_number', 'status']);
 
         self::seedSubscriptionPlans();
         self::migrateDefaultTenant();
         if (class_exists('SaasBilling')) {
             SaasBilling::installSchema();
+        }
+        if (class_exists('FastnetpayRuntime')) {
+            FastnetpayRuntime::markSchemaFresh('tenant', self::SCHEMA_VERSION);
         }
     }
 
@@ -411,19 +428,19 @@ class Tenant
         $config['tenant_dark_primary_color'] = (string) $tenant['dark_primary_color'];
         $config['tenant_dark_secondary_color'] = (string) $tenant['dark_secondary_color'];
 
-        $tenantGateways = self::setting('payment', 'active_gateways', '', (int) $tenant['id']);
-        if ($tenantGateways !== '') {
-            $config['payment_gateway'] = $tenantGateways;
-        }
-
-        foreach (['sms_gateway', 'sms_url', 'talksasa_api_endpoint', 'talksasa_sender_id'] as $smsSetting) {
-            $smsValue = self::setting('sms', $smsSetting, '', (int) $tenant['id']);
-            if ($smsValue !== '') {
-                $config[$smsSetting] = $smsValue;
-            }
-        }
-
         if (self::isTenantRequest()) {
+            $tenantGateways = self::setting('payment', 'active_gateways', '', (int) $tenant['id']);
+            if ($tenantGateways !== '') {
+                $config['payment_gateway'] = $tenantGateways;
+            }
+
+            foreach (['sms_gateway', 'sms_url', 'talksasa_api_endpoint', 'talksasa_sender_id'] as $smsSetting) {
+                $smsValue = self::setting('sms', $smsSetting, '', (int) $tenant['id']);
+                if ($smsValue !== '') {
+                    $config[$smsSetting] = $smsValue;
+                }
+            }
+
             $config['CompanyName'] = (string) $tenant['name'];
             $config['currency_code'] = (string) ($tenant['currency'] ?: ($config['currency_code'] ?? 'KES'));
             $config['timezone'] = (string) ($tenant['timezone'] ?: ($config['timezone'] ?? 'Africa/Nairobi'));
@@ -563,11 +580,16 @@ class Tenant
     public static function setting($namespace, $setting, $default = '', $tenantId = null)
     {
         $tenantId = $tenantId ?: self::currentId();
+        $cacheKey = (int) $tenantId . '|' . (string) $namespace . '|' . (string) $setting;
+        if (array_key_exists($cacheKey, self::$settingsCache)) {
+            return self::$settingsCache[$cacheKey] === null ? $default : self::$settingsCache[$cacheKey];
+        }
         $row = ORM::for_table('tenant_settings')
             ->where('tenant_id', (int) $tenantId)
             ->where('namespace', $namespace)
             ->where('setting', $setting)
             ->find_one();
+        self::$settingsCache[$cacheKey] = $row ? (string) $row['value'] : null;
         return $row ? (string) $row['value'] : $default;
     }
 
@@ -590,6 +612,7 @@ class Tenant
         $row->is_secret = $isSecret ? 1 : 0;
         $row->updated_at = date('Y-m-d H:i:s');
         $row->save();
+        unset(self::$settingsCache[(int) $tenantId . '|' . (string) $namespace . '|' . (string) $setting]);
     }
 
     public static function audit($action, $message = '', $resourceType = '', $resourceId = '', $tenantId = null, $adminId = null, $metadata = [])

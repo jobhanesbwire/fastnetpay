@@ -102,9 +102,9 @@ switch ($do) {
                         Tenant::audit('tenant.login_blocked', 'Login blocked because admin belongs to a different tenant.', 'user', (string) $d['id'], Tenant::currentId(), (int) $d['id']);
                         _alert(Lang::T('This administrator does not belong to this ISP tenant.'), 'danger', 'admin');
                     }
-                    if (class_exists('Tenant') && class_exists('SaasBilling') && Tenant::isTenantRequest() && $d['user_type'] !== 'SuperAdmin' && !SaasBilling::tenantCanLogin(Tenant::current())) {
+                    $tenantSuspendedLogin = class_exists('Tenant') && class_exists('SaasBilling') && Tenant::isTenantRequest() && $d['user_type'] !== 'SuperAdmin' && !SaasBilling::tenantCanLogin(Tenant::current());
+                    if ($tenantSuspendedLogin) {
                         Tenant::audit('tenant.login_blocked_suspended', 'Tenant admin login blocked because tenant is suspended.', 'user', (string) $d['id'], Tenant::currentId(), (int) $d['id']);
-                        _alert(SaasBilling::suspensionMessage(Tenant::currentId()), 'danger', 'admin');
                     }
                     if (class_exists('SaasBilling') && SaasBilling::requiresSuperAdmin2FA($d)) {
                         if ($isApi) {
@@ -135,6 +135,9 @@ switch ($do) {
                         } else {
                             showResult(false, Lang::T('Invalid Username or Password'));
                         }
+                    }
+                    if ($tenantSuspendedLogin) {
+                        _alert(SaasBilling::suspensionMessage(Tenant::currentId()), 'warning', "tenant-payment");
                     }
                     _alert(Lang::T('Login Successful'), 'success', "dashboard");
                 } else {

@@ -5,9 +5,15 @@ class JoviPay
     const SETTINGS_TABLE = 'jovipay_settings';
     const TX_TABLE = 'jovipay_transactions';
     const RECONNECT_TABLE = 'reconnection_attempts';
+    const SCHEMA_VERSION = '2026-07-09-perf1';
+    private static $settingsCache = [];
 
     public static function installSchema()
     {
+        if (class_exists('FastnetpayRuntime') && FastnetpayRuntime::schemaFresh('jovipay', self::SCHEMA_VERSION, 86400)) {
+            return;
+        }
+
         ORM::raw_execute("CREATE TABLE IF NOT EXISTS jovipay_settings (
             id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
             enabled TINYINT(1) NOT NULL DEFAULT 0,
@@ -86,6 +92,9 @@ class JoviPay
         self::ensureColumn(self::SETTINGS_TABLE, 'tenant_id', 'INT UNSIGNED NULL');
         self::ensureColumn(self::TX_TABLE, 'tenant_id', 'INT UNSIGNED NULL');
         self::ensureColumn(self::RECONNECT_TABLE, 'tenant_id', 'INT UNSIGNED NULL');
+        if (class_exists('FastnetpayRuntime')) {
+            FastnetpayRuntime::markSchemaFresh('jovipay', self::SCHEMA_VERSION);
+        }
     }
 
     public static function defaults()
@@ -116,16 +125,20 @@ class JoviPay
         self::installSchema();
         $defaults = self::defaults();
         $tenantId = class_exists('Tenant') ? (int) ($tenantId ?: Tenant::currentId()) : 0;
+        if (isset(self::$settingsCache[$tenantId])) {
+            return self::$settingsCache[$tenantId];
+        }
         $query = ORM::for_table(self::SETTINGS_TABLE)->order_by_asc('id');
         if (class_exists('Tenant') && Tenant::hasColumn(self::SETTINGS_TABLE, 'tenant_id')) {
             $query->where('tenant_id', $tenantId);
         }
         $row = $query->find_one();
         if (!$row) {
-            return $defaults;
+            self::$settingsCache[$tenantId] = self::overlayTenantGatewaySettings($defaults, $tenantId);
+            return self::$settingsCache[$tenantId];
         }
 
-        return [
+        self::$settingsCache[$tenantId] = self::overlayTenantGatewaySettings([
             'enabled' => (string) (int) $row['enabled'],
             'api_base_url' => (string) $row['api_base_url'],
             'stk_endpoint' => (string) $row['stk_endpoint'],
@@ -143,7 +156,8 @@ class JoviPay
             'payment_timeout_seconds' => (string) max(30, (int) $row['payment_timeout_seconds']),
             'polling_interval_seconds' => (string) max(3, (int) $row['polling_interval_seconds']),
             'allowed_ips' => (string) $row['allowed_ips'],
-        ];
+        ], $tenantId);
+        return self::$settingsCache[$tenantId];
     }
 
     public static function publicSettings()
@@ -223,6 +237,7 @@ class JoviPay
         $row->allowed_ips = self::cleanLines(_post('allowed_ips'));
         $row->updated_at = date('Y-m-d H:i:s');
         $row->save();
+        self::$settingsCache = [];
         if (class_exists('Tenant')) {
             Tenant::saveSetting('jovipay', 'account_prefix', $prefix, false, $tenantId);
             Tenant::audit('tenant.payment_settings_changed', 'Jovi-Pay settings changed.', 'jovipay_settings', (string) $row->id(), $tenantId, (int) ($admin['id'] ?? 0));
@@ -547,6 +562,27 @@ class JoviPay
             'reconnected' => (int) $scope(ORM::for_table(self::TX_TABLE)->where('status', 'reconnected'))->count(),
             'unmatched' => (int) $scope(ORM::for_table(self::TX_TABLE)->where_null('payment_gateway_id'))->count(),
         ];
+    }
+
+    private static function overlayTenantGatewaySettings($settings, $tenantId)
+    {
+        if (!class_exists('SaasBilling') || !method_exists('SaasBilling', 'tenantGatewayPublicSettings')) {
+            return $settings;
+        }
+        try {
+            $gateway = SaasBilling::tenantGatewayPublicSettings((int) $tenantId);
+            if (!$gateway) {
+                return $settings;
+            }
+            foreach (['enabled', 'account_prefix', 'callback_url', 'callback_secret', 'api_base_url', 'stk_endpoint', 'api_token', 'mini_app_id', 'gateway_label', 'support_phone'] as $key) {
+                if (array_key_exists($key, $gateway) && (string) $gateway[$key] !== '') {
+                    $settings[$key] = (string) $gateway[$key];
+                }
+            }
+        } catch (Throwable $e) {
+            _log('FASTNETPAY tenant gateway overlay skipped: ' . $e->getMessage(), 'Payment Gateway', 0);
+        }
+        return $settings;
     }
 
     private static function sendStk($settings, $reference, $phone, $amount, $callbackUrl, $metadata)

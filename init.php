@@ -85,6 +85,9 @@ ORM::configure('return_result_sets', true);
 if ($_app_stage != 'Live') {
     ORM::configure('logging', true);
 }
+if (class_exists('PerformanceProfiler')) {
+    PerformanceProfiler::boot($_app_stage ?? '', $config ?? []);
+}
 if ($isApi) {
     define('U', APP_URL . '/system/api.php?r=');
 } else {

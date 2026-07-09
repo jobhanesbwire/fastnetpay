@@ -88,6 +88,9 @@ $handler = $routes[0];
 if ($handler == '') {
     $handler = 'default';
 }
+if (class_exists('PerformanceProfiler')) {
+    PerformanceProfiler::setRoute($req);
+}
 try {
     if (!empty($_GET['uid'])) {
         $_COOKIE['uid'] = $_GET['uid'];
@@ -100,10 +103,10 @@ try {
             Admin::removeCookie();
             r2(getUrl('admin'), 'e', Lang::T('Please log in through your ISP tenant domain.'));
         }
-        if ($admin && class_exists('SaasBilling') && Tenant::isTenantRequest() && $admin['user_type'] !== 'SuperAdmin' && !SaasBilling::tenantCanLogin(Tenant::current())) {
+        $paymentOnlyRoutes = ['tenant-payment', 'admin', 'logout', 'api'];
+        if ($admin && class_exists('SaasBilling') && Tenant::isTenantRequest() && $admin['user_type'] !== 'SuperAdmin' && !SaasBilling::tenantCanLogin(Tenant::current()) && !in_array($handler, $paymentOnlyRoutes, true)) {
             Tenant::audit('tenant.access_blocked_suspended', 'Active tenant admin session blocked because tenant is suspended.', 'user', (string) $admin['id'], Tenant::currentId(), (int) $admin['id']);
-            Admin::removeCookie();
-            r2(getUrl('admin'), 'e', SaasBilling::suspensionMessage(Tenant::currentId()));
+            r2(getUrl('tenant-payment'), 'e', SaasBilling::suspensionMessage(Tenant::currentId()));
         }
         if ($admin && Tenant::isTenantRequest() && $admin['user_type'] !== 'SuperAdmin') {
             Tenant::denyTenantAccessToSuperAdminRoutes($handler, $routes);

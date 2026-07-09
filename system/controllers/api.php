@@ -11,6 +11,7 @@
  * /?_route=api/hotspot/reconnect
  * /?_route=api/hotspot/portal-file
  * /?_route=api/jovipay/callback
+ * /?_route=api/saas/mpesa/callback
  */
 
 $scope = $routes['1'] ?? '';
@@ -21,6 +22,13 @@ if ($scope === 'jovipay') {
         JoviPay::handleCallback();
     }
     fnp_hotspot_json(['ok' => false, 'message' => 'Jovi-Pay API endpoint not found.'], 404);
+}
+
+if ($scope === 'saas') {
+    if ($action === 'mpesa' && ($routes['3'] ?? '') === 'callback') {
+        SaasBilling::handlePaymentCallback();
+    }
+    fnp_hotspot_json(['ok' => false, 'message' => 'SaaS payment API endpoint not found.'], 404);
 }
 
 if ($scope !== 'hotspot') {

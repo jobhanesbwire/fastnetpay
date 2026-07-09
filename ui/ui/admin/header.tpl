@@ -25,7 +25,9 @@
     <link rel="stylesheet" href="{$app_url}/ui/ui/styles/fastnetpay-theme.css?2026.5.23" />
 
     <script src="{$app_url}/ui/ui/scripts/sweetalert2.all.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.5.1/dist/chart.min.js"></script>
+    {if $_routes[0] eq 'dashboard' || ($_routes[0] eq 'plugin' && in_array($_routes[1], ['mikrotik_monitor_ui','mikrotik_monitor_pppoe','mikrotik_monitor_hotspot']))}
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@3.5.1/dist/chart.min.js"></script>
+    {/if}
     <style>
         {if isset($_tenant) && $_tenant}
         :root {
@@ -165,6 +167,15 @@
                                 </li>
                                 <li {if $_routes[0] eq 'saas' && $_routes[1] eq 'billing'}class="active"{/if}>
                                     <a href="{Text::url('saas/billing')}">Plans / Billing</a>
+                                </li>
+                                <li {if $_routes[0] eq 'saas' && $_routes[1] eq 'payment-settings'}class="active"{/if}>
+                                    <a href="{Text::url('saas/payment-settings')}">SaaS Payment Settings</a>
+                                </li>
+                                <li {if $_routes[0] eq 'saas' && ($_routes[1] eq 'tenant-gateways' || $_routes[1] eq 'tenant-gateway-add' || $_routes[1] eq 'tenant-gateway-edit')}class="active"{/if}>
+                                    <a href="{Text::url('saas/tenant-gateways')}">Tenant Payment Gateways</a>
+                                </li>
+                                <li {if $_routes[0] eq 'saas' && $_routes[1] eq 'payment-reconciliation'}class="active"{/if}>
+                                    <a href="{Text::url('saas/payment-reconciliation')}">Payment Reconciliation</a>
                                 </li>
                                 <li {if $_routes[0] eq 'saas' && $_routes[1] eq '2fa'}class="active"{/if}>
                                     <a href="{Text::url('saas/2fa')}">SuperAdmin 2FA</a>
@@ -503,6 +514,9 @@
                                     <li {if $_routes[0] eq 'logs' && ($_routes[1] eq '' || $_routes[1] eq 'list') && _req('q') eq ''}class="active"{/if}><a href="{Text::url('logs/list')}">FASTNETPAY Logs</a></li>
                                     <li {if $_routes[0] eq 'logs' && $_routes[1] eq 'list' && _req('q') eq 'error'}class="active"{/if}><a href="{Text::url('logs/list&q=error')}">Error Logs</a></li>
                                     <li {if $_routes[0] eq 'logs' && $_routes[1] eq 'list' && _req('q') eq 'security'}class="active"{/if}><a href="{Text::url('logs/list&q=security')}">Security Logs</a></li>
+                                    {if $_admin['user_type'] eq 'SuperAdmin'}
+                                        <li {if $_routes[0] eq 'performance'}class="active"{/if}><a href="{Text::url('performance')}">Performance</a></li>
+                                    {/if}
                                     {if !$isTenantPortal}
                                         <li {if $_routes[0] eq 'expiry'}class="active"{/if}><a href="{Text::url('expiry/status')}">Expiry Worker</a></li>
                                     {/if}

@@ -181,6 +181,10 @@ switch ($action) {
         $ui->assign('invoice', $invoice);
         $ui->assign('tenant', ORM::for_table('tenants')->find_one((int) $invoice['tenant_id']));
         $ui->assign('items', SaasBilling::invoiceItems((int) $invoice['id']));
+        $ui->assign('payments', SaasBilling::invoicePayments((int) $invoice['id']));
+        $ui->assign('amount_paid', SaasBilling::invoicePaidAmount((int) $invoice['id']));
+        $ui->assign('balance_due', SaasBilling::invoiceBalance($invoice));
+        $ui->assign('account_reference', SaasBilling::tenantPaymentReference((int) $invoice['tenant_id'], $invoice));
         $ui->assign('csrf_token', Csrf::generateAndStoreToken());
         $ui->display('admin/saas/invoice.tpl');
         break;
@@ -192,6 +196,18 @@ switch ($action) {
         try {
             $invoice = SaasBilling::markPaid((int) ($routes['2'] ?? 0), (int) $admin['id']);
             r2(getUrl('saas/invoice/' . (int) $invoice['id']), 's', 'Invoice marked paid and tenant restored if suspended.');
+        } catch (Throwable $e) {
+            r2(getUrl('saas/billing'), 'e', $e->getMessage());
+        }
+        break;
+
+    case 'invoice-payment-void':
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !Csrf::check(_post('csrf_token'))) {
+            r2(getUrl('saas/billing'), 'e', Lang::T('Invalid or Expired CSRF Token'));
+        }
+        try {
+            SaasBilling::voidInvoicePayment((int) _post('payment_id'), _post('void_note'), (int) $admin['id']);
+            r2(getUrl('saas/invoice/' . (int) _post('invoice_id')), 's', 'Payment void/refund note recorded.');
         } catch (Throwable $e) {
             r2(getUrl('saas/billing'), 'e', $e->getMessage());
         }
@@ -212,6 +228,84 @@ switch ($action) {
             r2(getUrl('saas/billing'), 's', 'Tenant billing access updated.');
         } catch (Throwable $e) {
             r2(getUrl('saas/billing'), 'e', $e->getMessage());
+        }
+        break;
+
+    case 'payment-settings':
+        $ui->assign('_title', 'SaaS Payment Settings');
+        $ui->assign('settings', SaasBilling::paymentSettings());
+        $ui->assign('csrf_token', Csrf::generateAndStoreToken());
+        $ui->display('admin/saas/payment-settings.tpl');
+        break;
+
+    case 'payment-settings-save':
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !Csrf::check(_post('csrf_token'))) {
+            r2(getUrl('saas/payment-settings'), 'e', Lang::T('Invalid or Expired CSRF Token'));
+        }
+        try {
+            SaasBilling::savePaymentSettingsFromPost((int) $admin['id']);
+            r2(getUrl('saas/payment-settings'), 's', 'SaaS payment settings saved.');
+        } catch (Throwable $e) {
+            r2(getUrl('saas/payment-settings'), 'e', $e->getMessage());
+        }
+        break;
+
+    case 'tenant-gateways':
+        $ui->assign('_title', 'Tenant Payment Gateways');
+        $ui->assign('gateways', SaasBilling::tenantGateways());
+        $ui->assign('tenants', ORM::for_table('tenants')->where_not_equal('slug', 'main')->order_by_asc('name')->find_many());
+        $ui->assign('csrf_token', Csrf::generateAndStoreToken());
+        $ui->display('admin/saas/tenant-gateways.tpl');
+        break;
+
+    case 'tenant-gateway-add':
+    case 'tenant-gateway-edit':
+        $gateway = $action === 'tenant-gateway-edit' ? SaasBilling::tenantGateway((int) ($routes['2'] ?? 0)) : null;
+        if ($action === 'tenant-gateway-edit' && !$gateway) {
+            r2(getUrl('saas/tenant-gateways'), 'e', 'Tenant payment gateway not found.');
+        }
+        $tenantId = $gateway ? (int) $gateway['tenant_id'] : (int) _req('tenant_id');
+        $ui->assign('_title', $gateway ? 'Edit Tenant Payment Gateway' : 'Add Tenant Payment Gateway');
+        $ui->assign('gateway', $gateway);
+        $ui->assign('tenants', ORM::for_table('tenants')->where_not_equal('slug', 'main')->order_by_asc('name')->find_many());
+        $ui->assign('routers', $tenantId > 0 ? ORM::for_table('tbl_routers')->where('tenant_id', $tenantId)->order_by_asc('name')->find_many() : []);
+        $ui->assign('tenant_id', $tenantId);
+        $ui->assign('csrf_token', Csrf::generateAndStoreToken());
+        $ui->display('admin/saas/gateway-form.tpl');
+        break;
+
+    case 'tenant-gateway-save':
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !Csrf::check(_post('csrf_token'))) {
+            r2(getUrl('saas/tenant-gateways'), 'e', Lang::T('Invalid or Expired CSRF Token'));
+        }
+        try {
+            SaasBilling::saveTenantGatewayFromPost((int) $admin['id']);
+            r2(getUrl('saas/tenant-gateways'), 's', 'Tenant payment gateway saved.');
+        } catch (Throwable $e) {
+            $target = (int) _post('gateway_id') > 0 ? 'saas/tenant-gateway-edit/' . (int) _post('gateway_id') : 'saas/tenant-gateway-add';
+            r2(getUrl($target), 'e', $e->getMessage());
+        }
+        break;
+
+    case 'payment-reconciliation':
+        $ui->assign('_title', 'Payment Reconciliation');
+        $ui->assign('unmatched', SaasBilling::unmatchedPayments(200));
+        $ui->assign('invoice_payments', SaasBilling::saasInvoicePayments(200));
+        $ui->assign('customer_payments', SaasBilling::tenantCustomerPayments(200));
+        $ui->assign('invoices', ORM::for_table('saas_invoices')->where_not_equal('status', 'paid')->order_by_desc('id')->limit(200)->find_many());
+        $ui->assign('csrf_token', Csrf::generateAndStoreToken());
+        $ui->display('admin/saas/reconciliation.tpl');
+        break;
+
+    case 'reconcile-unmatched-post':
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !Csrf::check(_post('csrf_token'))) {
+            r2(getUrl('saas/payment-reconciliation'), 'e', Lang::T('Invalid or Expired CSRF Token'));
+        }
+        try {
+            SaasBilling::reconcileUnmatchedPayment((int) _post('unmatched_id'), (int) _post('invoice_id'), (int) $admin['id']);
+            r2(getUrl('saas/payment-reconciliation'), 's', 'Payment reconciled to invoice.');
+        } catch (Throwable $e) {
+            r2(getUrl('saas/payment-reconciliation'), 'e', $e->getMessage());
         }
         break;
 
