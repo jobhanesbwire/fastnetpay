@@ -63,6 +63,7 @@ for ($i = 0; $i < $count; $i++) {
 
 $ui->assign('widgets', $widgets);
 $ui->assign('expiry_health', ExpiryWorker::health($UPLOAD_PATH));
+$ui->assign('ops_analytics', fnp_dashboard_ops_analytics());
 if (($admin['user_type'] ?? '') === 'SuperAdmin' && class_exists('SaasBilling')) {
     try {
         $ui->assign('saas_analytics', SaasBilling::analytics());
@@ -72,3 +73,45 @@ if (($admin['user_type'] ?? '') === 'SuperAdmin' && class_exists('SaasBilling'))
 }
 run_hook('view_dashboard'); #HOOK
 $ui->display('admin/dashboard.tpl');
+
+function fnp_dashboard_table_exists($table)
+{
+    global $db_name;
+    try {
+        $row = ORM::for_table('information_schema.TABLES')
+            ->where('TABLE_SCHEMA', $db_name)
+            ->where('TABLE_NAME', $table)
+            ->find_one();
+        return (bool) $row;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function fnp_dashboard_ops_analytics()
+{
+    $data = [
+        'pos_today' => 0,
+        'pos_month' => 0,
+        'open_tickets' => 0,
+        'urgent_tickets' => 0,
+        'acs_devices' => 0,
+        'pppoe_balance' => 0,
+    ];
+    if (fnp_dashboard_table_exists('pos_sales')) {
+        $data['pos_today'] = (float) Tenant::scopeIfTenant(ORM::for_table('pos_sales')->where_gte('created_at', date('Y-m-d') . ' 00:00:00'))->sum('total');
+        $data['pos_month'] = (float) Tenant::scopeIfTenant(ORM::for_table('pos_sales')->where_gte('created_at', date('Y-m-01') . ' 00:00:00'))->sum('total');
+    }
+    if (fnp_dashboard_table_exists('support_tickets')) {
+        $data['open_tickets'] = (int) Tenant::scopeIfTenant(ORM::for_table('support_tickets')->where_in('status', ['open', 'in_progress', 'waiting_customer']))->count();
+        $data['urgent_tickets'] = (int) Tenant::scopeIfTenant(ORM::for_table('support_tickets')->where('priority', 'urgent')->where_not_in('status', ['resolved', 'closed']))->count();
+    }
+    if (fnp_dashboard_table_exists('acs_devices')) {
+        $data['acs_devices'] = (int) Tenant::scopeIfTenant(ORM::for_table('acs_devices'))->count();
+    }
+    if (class_exists('Tenant') && Tenant::hasColumn('tbl_customers', 'balance')) {
+        $row = Tenant::scopeIfTenant(ORM::for_table('tbl_customers')->select_expr('COALESCE(SUM(balance),0)', 'balance_total')->where('service_type', 'PPPoE'))->find_one();
+        $data['pppoe_balance'] = (float) ($row['balance_total'] ?? 0);
+    }
+    return $data;
+}

@@ -31,6 +31,14 @@
                 <span>Not Expired</span>
                 <strong data-fnp-count="{$pppoe_summary.not_expired}">{$pppoe_summary.not_expired}</strong>
             </div>
+            <div class="fnp-report-stat">
+                <span>Wallet Balance</span>
+                <strong>{Lang::moneyFormat($pppoe_summary.balance_total)}</strong>
+            </div>
+            <div class="fnp-report-stat is-success">
+                <span>With Balance</span>
+                <strong data-fnp-count="{$pppoe_summary.with_balance}">{$pppoe_summary.with_balance}</strong>
+            </div>
             <div class="fnp-report-stat is-warning">
                 <span>Expired</span>
                 <strong data-fnp-count="{$pppoe_summary.expired}">{$pppoe_summary.expired}</strong>
@@ -216,6 +224,9 @@
                                     </a>
                                     <a href="{Text::url('plan/recharge/', $ds['id'], '&token=', $csrf_token)}" class="btn btn-primary btn-xs" title="{Lang::T('Recharge')}" data-toggle="tooltip">
                                         <i class="fa fa-bolt"></i>
+                                    </a>
+                                    <a href="{Text::url('plan/deposit/', $ds['id'])}" class="btn btn-warning btn-xs" title="Top up balance" data-toggle="tooltip">
+                                        <i class="fa fa-money"></i>
                                     </a>
                                 </td>
                             </tr>

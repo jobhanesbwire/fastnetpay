@@ -196,7 +196,7 @@
                         </li>
                     {/if}
 
-                    <li class="{if ($_routes[0] eq 'customers') || ($_routes[0] eq 'plan' && $_routes[1] eq 'list' && _req('status') eq 'off')}active{/if} treeview">
+                    <li class="{if ($_routes[0] eq 'customers') || ($_routes[0] eq 'maps' && $_routes[1] eq 'customer') || ($_routes[0] eq 'plan' && $_routes[1] eq 'list' && _req('status') eq 'off')}active{/if} treeview">
                         <a href="#">
                             <i class="fa fa-users"></i> <span>Clients</span>
                             <span class="pull-right-container"><i class="fa fa-angle-left pull-right"></i></span>
@@ -220,13 +220,48 @@
                             <li {if $_routes[0] eq 'customers' && $_routes[1] eq 'add'}class="active"{/if}>
                                 <a href="{Text::url('customers/add')}">Add Client</a>
                             </li>
+                            <li {if $_routes[0] eq 'maps' && $_routes[1] eq 'customer'}class="active"{/if}>
+                                <a href="{Text::url('maps/customer')}">Client Locations</a>
+                            </li>
                             {$_MENU_CUSTOMERS}
                             {$_MENU_AFTER_CUSTOMERS}
                         </ul>
                     </li>
 
+                    {if in_array($_admin['user_type'],['SuperAdmin','Admin','Agent','Sales'])}
+                        <li class="{if $_routes[0] eq 'pos'}active{/if} treeview">
+                            <a href="#">
+                                <i class="fa fa-shopping-cart"></i> <span>Point of Sale</span>
+                                <span class="pull-right-container"><i class="fa fa-angle-left pull-right"></i></span>
+                            </a>
+                            <ul class="treeview-menu">
+                                <li {if $_routes[0] eq 'pos' && ($_routes[1] eq 'sell' || $_routes[1] eq '')}class="active"{/if}>
+                                    <a href="{Text::url('pos/sell')}">POS Terminal</a>
+                                </li>
+                                <li {if $_routes[0] eq 'pos' && $_routes[1] eq 'dashboard'}class="active"{/if}>
+                                    <a href="{Text::url('pos/dashboard')}">Dashboard</a>
+                                </li>
+                                <li {if $_routes[0] eq 'pos' && $_routes[1] eq 'product-list'}class="active"{/if}>
+                                    <a href="{Text::url('pos/product-list')}">Products List</a>
+                                </li>
+                                <li {if $_routes[0] eq 'pos' && in_array($_routes[1], ['product-add','product-edit'])}class="active"{/if}>
+                                    <a href="{Text::url('pos/product-add')}">Add Product</a>
+                                </li>
+                                <li {if $_routes[0] eq 'pos' && $_routes[1] eq 'stock'}class="active"{/if}>
+                                    <a href="{Text::url('pos/stock')}">Stock Management</a>
+                                </li>
+                                <li {if $_routes[0] eq 'pos' && $_routes[1] eq 'reports'}class="active"{/if}>
+                                    <a href="{Text::url('pos/reports')}">Sales Reports</a>
+                                </li>
+                                <li {if $_routes[0] eq 'pos' && $_routes[1] eq 'history'}class="active"{/if}>
+                                    <a href="{Text::url('pos/history')}">Transaction History</a>
+                                </li>
+                            </ul>
+                        </li>
+                    {/if}
+
                     {if !in_array($_admin['user_type'],['Report'])}
-                        <li class="{if ($_routes[0] eq 'plan' && (in_array($_routes[1], ['recharge','refill','deposit','voucher','add-voucher']) || ($_routes[1] eq 'list' && _req('status') neq 'off'))) || $_routes[0] eq 'coupons'}active{/if} treeview">
+                        <li class="{if ($_routes[0] eq 'plan' && (in_array($_routes[1], ['recharge','refill','deposit','voucher','add-voucher','exp_today','exp_query','not_expired']) || ($_routes[1] eq 'list' && _req('status') neq 'off'))) || $_routes[0] eq 'coupons'}active{/if} treeview">
                             <a href="#">
                                 <i class="fa fa-refresh"></i> <span>Sales &amp; Recharge</span>
                                 <span class="pull-right-container"><i class="fa fa-angle-left pull-right"></i></span>
@@ -247,6 +282,15 @@
                                 {/if}
                                 <li {if $_routes[0] eq 'plan' && $_routes[1] eq 'list' && _req('status') neq 'off'}class="active"{/if}>
                                     <a href="{Text::url('plan/list&status=on')}">Active Subscriptions</a>
+                                </li>
+                                <li {if $_routes[0] eq 'plan' && $_routes[1] eq 'exp_today'}class="active"{/if}>
+                                    <a href="{Text::url('plan/exp_today')}">Expiring Today</a>
+                                </li>
+                                <li {if $_routes[0] eq 'plan' && $_routes[1] eq 'exp_query'}class="active"{/if}>
+                                    <a href="{Text::url('plan/exp_query')}">Expiration Tracker</a>
+                                </li>
+                                <li {if $_routes[0] eq 'plan' && $_routes[1] eq 'not_expired'}class="active"{/if}>
+                                    <a href="{Text::url('plan/not_expired')}">Not Expired</a>
                                 </li>
                                 <li {if $_routes[0] eq 'plan' && $_routes[1] eq 'voucher'}class="active"{/if}>
                                     <a href="{Text::url('plan/voucher')}">Vouchers</a>
@@ -308,6 +352,9 @@
                                 <li {if $_routes[0] eq 'paymentgateway' && $_routes[1] eq 'mpesastkpush'}class="active"{/if}>
                                     <a href="{Text::url('paymentgateway/mpesastkpush')}">MPESA STK Push</a>
                                 </li>
+                                <li {if $_routes[0] eq 'paymentgateway' && $_routes[1] eq 'audit' && $_routes[2] eq 'mpesastkpush'}class="active"{/if}>
+                                    <a href="{Text::url('paymentgateway/audit/mpesastkpush')}">Gateway Audit</a>
+                                </li>
                                 <li {if $_routes[0] eq 'jovipay' && ($_routes[1] eq 'settings' || $_routes[1] eq '')}class="active"{/if}>
                                     <a href="{Text::url('jovipay/settings')}">Jovi-Pay Integration</a>
                                 </li>
@@ -317,8 +364,11 @@
                                 <li {if $_routes[0] eq 'reports' && $_routes[1] eq 'mpesa-logs'}class="active"{/if}>
                                     <a href="{Text::url('reports/mpesa-logs')}">MPESA Logs</a>
                                 </li>
-                                <li {if $_routes[0] eq 'jovipay' && $_routes[1] eq 'transactions'}class="active"{/if}>
+                                <li {if $_routes[0] eq 'jovipay' && $_routes[1] eq 'transactions' && _req('status') neq 'pending'}class="active"{/if}>
                                     <a href="{Text::url('jovipay/transactions')}">Jovi-Pay Transactions</a>
+                                </li>
+                                <li {if $_routes[0] eq 'jovipay' && $_routes[1] eq 'transactions' && _req('status') eq 'pending'}class="active"{/if}>
+                                    <a href="{Text::url('jovipay/transactions&status=pending')}">Pending Reconciliation</a>
                                 </li>
                                 <li {if $_routes[0] eq 'reports' && $_routes[1] eq 'transactions'}class="active"{/if}>
                                     <a href="{Text::url('reports/transactions')}">Transactions</a>
@@ -329,7 +379,7 @@
                     {/if}
 
                     {if in_array($_admin['user_type'],['SuperAdmin','Admin'])}
-                        <li class="{if ($_routes[0] eq 'plugin' && in_array($_routes[1], ['mikrotik_monitor_ui','mikrotik_monitor_pppoe','mikrotik_monitor_hotspot','mikrotik_import_ui','mikrotik_import_start_ui'])) || in_array($_routes[0], ['routers','pool','odp','radius'])}active{/if} treeview">
+                        <li class="{if ($_routes[0] eq 'plugin' && in_array($_routes[1], ['mikrotik_monitor_ui','mikrotik_monitor_pppoe','mikrotik_monitor_hotspot','mikrotik_import_ui','mikrotik_import_start_ui'])) || in_array($_routes[0], ['routers','pool','odp','radius']) || ($_routes[0] eq 'maps' && in_array($_routes[1], ['routers','odp']))}active{/if} treeview">
                             <a href="#">
                                 <i class="ion ion-wifi"></i> <span>MikroTik</span>
                                 <span class="pull-right-container">
@@ -342,6 +392,9 @@
                                 </li>
                                 <li {if $_routes[0] eq 'routers' && !in_array($_routes[1], ['provision','provision-preview','provision-run','provision-logs'])}class="active"{/if}>
                                     <a href="{Text::url('routers')}">Routers</a>
+                                </li>
+                                <li {if $_routes[0] eq 'maps' && $_routes[1] eq 'routers'}class="active"{/if}>
+                                    <a href="{Text::url('maps/routers')}">Router Maps</a>
                                 </li>
                                 <li {if $_routes[0] eq 'routers' && in_array($_routes[1], ['provision','provision-preview','provision-run','provision-logs'])}class="active"{/if}>
                                     <a href="{Text::url('routers/provision')}">Provisioning Wizard</a>
@@ -360,6 +413,9 @@
                                 </li>
                                 <li {if $_routes[0] eq 'odp' && $_routes[1] eq ''}class="active"{/if}>
                                     <a href="{Text::url('odp')}">ODP / Fiber Points</a>
+                                </li>
+                                <li {if $_routes[0] eq 'maps' && $_routes[1] eq 'odp'}class="active"{/if}>
+                                    <a href="{Text::url('maps/odp')}">ODP / Fiber Maps</a>
                                 </li>
                                 <li {if $_routes[0] eq 'plugin' && in_array($_routes[1], ['mikrotik_import_ui','mikrotik_import_start_ui'])}class="active"{/if}>
                                     <a href="{Text::url('plugin/mikrotik_import_ui')}">MikroTik Import</a>
@@ -386,8 +442,14 @@
                             <li {if $_routes[0] eq 'message' && ($_routes[1] eq '' || $_routes[1] eq 'send')}class="active"{/if}>
                                 <a href="{Text::url('message/send')}">Send Single SMS</a>
                             </li>
-                            <li {if $_routes[0] eq 'message' && $_routes[1] eq 'send_bulk'}class="active"{/if}>
+                            <li {if $_routes[0] eq 'message' && $_routes[1] eq 'send_bulk' && _req('group') eq '' && _req('router') eq '' && _req('focus') neq 'router'}class="active"{/if}>
                                 <a href="{Text::url('message/send_bulk')}">Bulk SMS</a>
+                            </li>
+                            <li {if $_routes[0] eq 'message' && $_routes[1] eq 'send_bulk' && _req('group') neq ''}class="active"{/if}>
+                                <a href="{Text::url('message/send_bulk&group=active')}">Query-Based SMS</a>
+                            </li>
+                            <li {if $_routes[0] eq 'message' && $_routes[1] eq 'send_bulk' && (_req('router') neq '' || _req('focus') eq 'router')}class="active"{/if}>
+                                <a href="{Text::url('message/send_bulk&focus=router')}">Router-Based SMS</a>
                             </li>
                             {if !$isTenantPortal && in_array($_admin['user_type'],['SuperAdmin','Admin'])}
                                 <li {if $_routes[0] eq 'plugin' && $_routes[1] eq 'talksasa'}class="active"{/if}>
@@ -406,6 +468,53 @@
                         </ul>
                     </li>
                     {$_MENU_AFTER_MESSAGE}
+
+                    {if in_array($_admin['user_type'],['SuperAdmin','Admin','Agent'])}
+                        <li {if $_routes[0] eq 'acs'}class="active"{/if}>
+                            <a href="{Text::url('acs')}">
+                                <i class="ion ion-settings"></i>
+                                <span class="text">ACS</span>
+                            </a>
+                        </li>
+                    {/if}
+
+                    {if in_array($_admin['user_type'],['SuperAdmin','Admin','Agent','Sales','Report'])}
+                        <li class="{if $_routes[0] eq 'tickets'}active{/if} treeview">
+                            <a href="#">
+                                <i class="fa fa-ticket"></i> <span>Support Tickets</span>
+                                <span class="pull-right-container"><i class="fa fa-angle-left pull-right"></i></span>
+                            </a>
+                            <ul class="treeview-menu">
+                                <li {if $_routes[0] eq 'tickets' && ($_routes[1] eq 'list' || $_routes[1] eq '') && _req('status') eq '' && _req('priority') eq ''}class="active"{/if}>
+                                    <a href="{Text::url('tickets/list')}">All Tickets</a>
+                                </li>
+                                <li {if $_routes[0] eq 'tickets' && $_routes[1] eq 'add'}class="active"{/if}>
+                                    <a href="{Text::url('tickets/add')}">Create Ticket</a>
+                                </li>
+                                <li {if $_routes[0] eq 'tickets' && _req('status') eq 'open'}class="active"{/if}>
+                                    <a href="{Text::url('tickets/list&status=open')}">Open Tickets</a>
+                                </li>
+                                <li {if $_routes[0] eq 'tickets' && _req('status') eq 'in_progress'}class="active"{/if}>
+                                    <a href="{Text::url('tickets/list&status=in_progress')}">In Progress</a>
+                                </li>
+                                <li {if $_routes[0] eq 'tickets' && _req('priority') eq 'urgent'}class="active"{/if}>
+                                    <a href="{Text::url('tickets/list&priority=urgent')}">Urgent Tickets</a>
+                                </li>
+                                <li {if $_routes[0] eq 'tickets' && _req('assigned_to') eq 'unassigned'}class="active"{/if}>
+                                    <a href="{Text::url('tickets/list&assigned_to=unassigned')}">Unassigned</a>
+                                </li>
+                                <li {if $_routes[0] eq 'tickets' && _req('status') eq 'waiting_customer'}class="active"{/if}>
+                                    <a href="{Text::url('tickets/list&status=waiting_customer')}">Waiting Customer</a>
+                                </li>
+                                <li {if $_routes[0] eq 'tickets' && _req('status') eq 'resolved'}class="active"{/if}>
+                                    <a href="{Text::url('tickets/list&status=resolved')}">Resolved</a>
+                                </li>
+                                <li {if $_routes[0] eq 'tickets' && _req('status') eq 'closed'}class="active"{/if}>
+                                    <a href="{Text::url('tickets/list&status=closed')}">Closed Tickets</a>
+                                </li>
+                            </ul>
+                        </li>
+                    {/if}
 
                     {if in_array($_admin['user_type'],['SuperAdmin','Admin', 'Report'])}
                         <li class="{if $_routes[0] eq 'reports' && !in_array($_routes[1], ['mpesa-logs','transactions'])}active{/if} treeview">
@@ -436,7 +545,7 @@
                     {$_MENU_AFTER_REPORTS}
 
                     {if !$isTenantPortal && in_array($_admin['user_type'],['SuperAdmin','Admin'])}
-                    <li class="{if ($_routes[0] eq 'plugin' && in_array($_routes[1], ['speedtest','system_info'])) || in_array($_routes[0], ['maps','pages','widgets'])}active{/if} treeview">
+                    <li class="{if ($_routes[0] eq 'plugin' && in_array($_routes[1], ['speedtest','system_info'])) || in_array($_routes[0], ['pages','widgets'])}active{/if} treeview">
                         <a href="#">
                             <i class="fa fa-wrench"></i> <span>Tools</span>
                             <span class="pull-right-container"><i class="fa fa-angle-left pull-right"></i></span>
@@ -445,11 +554,26 @@
                             <li {if $_routes[0] eq 'plugin' && $_routes[1] eq 'speedtest'}class="active"{/if}>
                                 <a href="{Text::url('plugin/speedtest')}">Internet Speedtest</a>
                             </li>
-                            <li {if $_routes[0] eq 'maps'}class="active"{/if}>
-                                <a href="{Text::url('maps/customer')}">Maps</a>
-                            </li>
-                            <li {if $_routes[0] eq 'pages'}class="active"{/if}>
+                            <li {if $_routes[0] eq 'pages' && ($_routes[1] eq '' || $_routes[1] eq 'Announcement')}class="active"{/if}>
                                 <a href="{Text::url('pages/Announcement')}">Static Pages</a>
+                            </li>
+                            <li {if $_routes[0] eq 'pages' && $_routes[1] eq 'Order_Voucher'}class="active"{/if}>
+                                <a href="{Text::url('pages/Order_Voucher')}">Order Voucher Page</a>
+                            </li>
+                            <li {if $_routes[0] eq 'pages' && $_routes[1] eq 'Voucher'}class="active"{/if}>
+                                <a href="{Text::url('pages/Voucher')}">Voucher Template</a>
+                            </li>
+                            <li {if $_routes[0] eq 'pages' && $_routes[1] eq 'Announcement_Customer'}class="active"{/if}>
+                                <a href="{Text::url('pages/Announcement_Customer')}">Customer Announcement</a>
+                            </li>
+                            <li {if $_routes[0] eq 'pages' && $_routes[1] eq 'Registration_Info'}class="active"{/if}>
+                                <a href="{Text::url('pages/Registration_Info')}">Registration Info</a>
+                            </li>
+                            <li {if $_routes[0] eq 'pages' && $_routes[1] eq 'Privacy_Policy'}class="active"{/if}>
+                                <a href="{Text::url('pages/Privacy_Policy')}">Privacy Policy</a>
+                            </li>
+                            <li {if $_routes[0] eq 'pages' && $_routes[1] eq 'Terms_and_Conditions'}class="active"{/if}>
+                                <a href="{Text::url('pages/Terms_and_Conditions')}">Terms and Conditions</a>
                             </li>
                             <li {if $_routes[0] eq 'widgets'}class="active"{/if}>
                                 <a href="{Text::url('widgets')}">Widgets</a>
@@ -514,6 +638,9 @@
                                     <li {if $_routes[0] eq 'logs' && ($_routes[1] eq '' || $_routes[1] eq 'list') && _req('q') eq ''}class="active"{/if}><a href="{Text::url('logs/list')}">FASTNETPAY Logs</a></li>
                                     <li {if $_routes[0] eq 'logs' && $_routes[1] eq 'list' && _req('q') eq 'error'}class="active"{/if}><a href="{Text::url('logs/list&q=error')}">Error Logs</a></li>
                                     <li {if $_routes[0] eq 'logs' && $_routes[1] eq 'list' && _req('q') eq 'security'}class="active"{/if}><a href="{Text::url('logs/list&q=security')}">Security Logs</a></li>
+                                    {if $_c['radius_enable']}
+                                        <li {if $_routes[0] eq 'logs' && $_routes[1] eq 'radius'}class="active"{/if}><a href="{Text::url('logs/radius')}">Radius Logs</a></li>
+                                    {/if}
                                     {if $_admin['user_type'] eq 'SuperAdmin'}
                                         <li {if $_routes[0] eq 'performance'}class="active"{/if}><a href="{Text::url('performance')}">Performance</a></li>
                                     {/if}

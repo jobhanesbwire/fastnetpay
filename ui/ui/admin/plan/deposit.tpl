@@ -13,6 +13,9 @@
                             <select id="personSelect" class="form-control select2" onchange="getBalance(this)"
                                 name="id_customer" style="width: 100%"
                                 data-placeholder="{Lang::T('Select a customer')}...">
+                                {if isset($cust) && $cust}
+                                    <option value="{$cust['id']}" selected>{$cust['username']} - {$cust['fullname']} ({Lang::moneyFormat($cust['balance'])})</option>
+                                {/if}
                             </select>
                             <span class="help-block" id="customerBalance">-</span>
                         </div>

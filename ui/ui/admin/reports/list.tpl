@@ -1,5 +1,44 @@
 {include file="sections/header.tpl"}
 <!-- reports-daily -->
+<div class="fnp-report-page">
+    <div class="fnp-clients-head">
+        <div>
+            <span class="fnp-report-kicker"><i class="fa fa-line-chart"></i> FASTNETPAY Analytics</span>
+            <h2>Daily Reports</h2>
+            <p>{Lang::dateAndTimeFormat($sd, $ts)} - {Lang::dateAndTimeFormat($ed, $te)}</p>
+        </div>
+        <div class="fnp-clients-head-actions">
+            <a href="{Text::url('reports&sd=', date('Y-m-d'), '&ed=', date('Y-m-d'))}" class="btn btn-success btn-sm">Today</a>
+            <a href="{Text::url('reports&sd=', date('Y-m-d', strtotime('monday this week')), '&ed=', date('Y-m-d'))}" class="btn btn-default btn-sm">This Week</a>
+            <a href="{Text::url('reports&sd=', date('Y-m-01'), '&ed=', date('Y-m-d'))}" class="btn btn-default btn-sm">This Month</a>
+            <a href="{Text::url('reports&sd=', date('Y-m-d', strtotime('-30 days')), '&ed=', date('Y-m-d'))}" class="btn btn-default btn-sm">Last 30d</a>
+        </div>
+    </div>
+
+    <div class="fnp-report-summary">
+        <div class="fnp-report-stat is-success">
+            <span>Total Revenue</span>
+            <strong>{Lang::moneyFormat($summary.total_amount)}</strong>
+        </div>
+        <div class="fnp-report-stat">
+            <span>Transactions</span>
+            <strong data-fnp-count="{$summary.transactions}">{$summary.transactions}</strong>
+        </div>
+        <div class="fnp-report-stat is-warning">
+            <span>Average Sale</span>
+            <strong>{Lang::moneyFormat($summary.average)}</strong>
+        </div>
+        <div class="fnp-report-stat">
+            <span>Hotspot / PPPoE</span>
+            <strong>{$summary.hotspot} / {$summary.pppoe}</strong>
+        </div>
+        <div class="fnp-report-stat is-success">
+            <span>Balance Top-Ups</span>
+            <strong data-fnp-count="{$summary.balance}">{$summary.balance}</strong>
+        </div>
+    </div>
+</div>
+
 <div class="row">
     <div class="col-lg-3">
         <form method="get" class="form">

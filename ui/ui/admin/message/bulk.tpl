@@ -16,10 +16,10 @@
                             <select class="form-control select2" name="router" id="router">
                                 <option value="">{Lang::T('All Routers')}</option>
                                 {if $_c['radius_enable']}
-                                <option value="radius">{Lang::T('Radius')}</option>
+                                <option value="radius" {if $selected_router=='radius'}selected{/if}>{Lang::T('Radius')}</option>
                                 {/if}
-                                {foreach $routers as $router}
-                                <option value="{$router['id']}">{$router['name']}</option>
+                                {foreach $routers as $rtr}
+                                <option value="{$rtr['id']}" {if $selected_router==$rtr['id']}selected{/if}>{$rtr['name']}</option>
                                 {/foreach}
                             </select>
                         </div>
@@ -28,7 +28,7 @@
                         <label class="col-md-2 control-label">{Lang::T('Service Type')}</label>
                         <div class="col-md-6">
                             <select class="form-control" name="service" id="service">
-                                <option value="all" {if $group=='all' }selected{/if}>{Lang::T('All')}</option>
+                                <option value="all" {if $service=='all' }selected{/if}>{Lang::T('All')}</option>
                                 <option value="PPPoE" {if $service=='PPPoE' }selected{/if}>{Lang::T('PPPoE')}</option>
                                 <option value="Hotspot" {if $service=='Hotspot' }selected{/if}>{Lang::T('Hotspot')}</option>
                                 <option value="VPN" {if $service=='VPN' }selected{/if}>{Lang::T('VPN')}</option>

@@ -130,6 +130,14 @@ EOT;
 
         $routerQuery = ORM::for_table('tbl_routers')->where('enabled', '1');
         $ui->assign('routers', Tenant::scopeIfTenant($routerQuery)->find_many());
+        $ui->assign('group', _req('group') ?: 'all');
+        $ui->assign('service', _req('service') ?: 'all');
+        $ui->assign('selected_router', _req('router'));
+        $ui->assign('via', _req('via') ?: 'sms');
+        $ui->assign('batch', _req('batch') ?: '20');
+        $ui->assign('message', _req('message'));
+        $ui->assign('page', (int) (_req('page') ?: 0));
+        $ui->assign('totalCustomers', 0);
         $ui->display('admin/message/bulk.tpl');
         break;
 

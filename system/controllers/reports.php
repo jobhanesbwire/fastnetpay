@@ -398,31 +398,10 @@ switch ($action) {
         $urlquery = str_replace('_route=reports', '', $_SERVER['QUERY_STRING']);
 
 
-        $query = ORM::for_table('tbl_transactions')
-            ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) >= " . strtotime("$sd $ts"))
-            ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) <= " . strtotime("$ed $te"))
-            ->order_by_desc('id');
-        $query = Tenant::scopeIfTenant($query);
-        if (count($tps) > 0) {
-            $query->where_in('type', $tps);
-        }
-        if (count($mts) > 0) {
-            $w = [];
-            $v = [];
-            foreach ($mts as $mt) {
-                $w[] ='method';
-                $v[] = "$mt - %";
-            }
-            $query->where_likes($w, $v);
-        }
-        if (count($rts) > 0) {
-            $query->where_in('routers', $rts);
-        }
-        if (count($plns) > 0) {
-            $query->where_in('plan_name', $plns);
-        }
+        $query = reports_daily_query($sd, $ed, $ts, $te, $tps, $mts, $rts, $plns);
         $d = Paginator::findMany($query, [], 100, $urlquery);
-        $dr = $query->sum('price');
+        $dr = reports_daily_query($sd, $ed, $ts, $te, $tps, $mts, $rts, $plns)->sum('price');
+        $summary = reports_daily_summary($sd, $ed, $ts, $te, $tps, $mts, $rts, $plns);
 
         $ui->assign('methods', $methods);
         $ui->assign('types', $types);
@@ -443,6 +422,7 @@ switch ($action) {
 
         $ui->assign('d', $d);
         $ui->assign('dr', $dr);
+        $ui->assign('summary', $summary);
         $ui->assign('mdate', $mdate);
         run_hook('view_daily_reports'); #HOOK
         $ui->display('admin/reports/list.tpl');
@@ -452,6 +432,53 @@ switch ($action) {
 function reports_mpesa_date($value, $fallback)
 {
     return preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) ? $value : $fallback;
+}
+
+function reports_daily_query($sd, $ed, $ts, $te, $tps = [], $mts = [], $rts = [], $plns = [])
+{
+    $query = ORM::for_table('tbl_transactions')
+        ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) >= " . strtotime("$sd $ts"))
+        ->whereRaw("UNIX_TIMESTAMP(CONCAT(`recharged_on`,' ',`recharged_time`)) <= " . strtotime("$ed $te"))
+        ->order_by_desc('id');
+    $query = Tenant::scopeIfTenant($query);
+    if (count($tps) > 0) {
+        $query->where_in('type', $tps);
+    }
+    if (count($mts) > 0) {
+        $w = [];
+        $v = [];
+        foreach ($mts as $mt) {
+            $w[] = 'method';
+            $v[] = "$mt - %";
+        }
+        $query->where_likes($w, $v);
+    }
+    if (count($rts) > 0) {
+        $query->where_in('routers', $rts);
+    }
+    if (count($plns) > 0) {
+        $query->where_in('plan_name', $plns);
+    }
+    return $query;
+}
+
+function reports_daily_summary($sd, $ed, $ts, $te, $tps = [], $mts = [], $rts = [], $plns = [])
+{
+    $base = reports_daily_query($sd, $ed, $ts, $te, $tps, $mts, $rts, $plns);
+    $totalAmount = (float) $base->sum('price');
+    $totalCount = (int) reports_daily_query($sd, $ed, $ts, $te, $tps, $mts, $rts, $plns)->count();
+    $hotspot = (int) reports_daily_query($sd, $ed, $ts, $te, ['Hotspot'], $mts, $rts, $plns)->count();
+    $pppoe = (int) reports_daily_query($sd, $ed, $ts, $te, ['PPPOE', 'PPPoE'], $mts, $rts, $plns)->count();
+    $balance = (int) reports_daily_query($sd, $ed, $ts, $te, ['Balance'], $mts, $rts, $plns)->count();
+
+    return [
+        'total_amount' => $totalAmount,
+        'transactions' => $totalCount,
+        'average' => $totalCount > 0 ? $totalAmount / $totalCount : 0,
+        'hotspot' => $hotspot,
+        'pppoe' => $pppoe,
+        'balance' => $balance,
+    ];
 }
 
 function reports_mpesa_query($sd, $ed, $status = 'all', $q = '')

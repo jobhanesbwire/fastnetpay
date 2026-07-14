@@ -17,7 +17,7 @@
                 </div> *}
                 {/if}
                 &nbsp;
-                {Lang::T('Active Customers')}
+                {if isset($list_title)}{$list_title}{else}{Lang::T('Active Customers')}{/if}
             </div>
             <form id="site-search" method="post" action="{Text::url('')}plan/list/">
                 <div class="panel-body">

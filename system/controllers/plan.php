@@ -69,6 +69,67 @@ function fnp_plan_router_exists($routerName)
     return (bool) Tenant::scopeIfTenant($query)->find_one();
 }
 
+function fnp_plan_render_recharge_list($title, $dateMode = '', $forcedStatus = null)
+{
+    global $ui;
+
+    $ui->assign('_title', $title);
+    $search = _post('search');
+    if ($search === '') {
+        $search = _req('search');
+    }
+    $status = $forcedStatus !== null ? $forcedStatus : _req('status');
+    $router = _req('router');
+    $plan = _req('plan');
+    $append_url = "&search=" . urlencode($search)
+        . "&status=" . urlencode($status)
+        . "&router=" . urlencode($router)
+        . "&plan=" . urlencode($plan);
+    $ui->assign('append_url', $append_url);
+    $ui->assign('plan', $plan);
+    $ui->assign('status', $status);
+    $ui->assign('router', $router);
+    $ui->assign('search', $search);
+    $ui->assign('list_title', $title);
+    $routersQuery = ORM::for_table('tbl_user_recharges')->distinct()->select("routers")->whereNotEqual('routers', '');
+    $ui->assign('routers', array_column(Tenant::scopeIfTenant($routersQuery)->findArray(), 'routers'));
+
+    $plansUsedQuery = ORM::for_table('tbl_user_recharges')->distinct()->select("plan_id");
+    $plns = Tenant::scopeIfTenant($plansUsedQuery)->findArray();
+    $ids = array_column($plns, 'plan_id');
+    if (count($ids)) {
+        $activePlanQuery = ORM::for_table('tbl_plans')->select("id")->select('name_plan')->where_id_in($ids);
+        $ui->assign('plans', Tenant::scopeIfTenant($activePlanQuery)->findArray());
+    } else {
+        $ui->assign('plans', []);
+    }
+
+    $query = ORM::for_table('tbl_user_recharges')->order_by_desc('id');
+    $query = Tenant::scopeIfTenant($query);
+    if ($search != '') {
+        $query->where_like("username", "%$search%");
+    }
+    if (!empty($router)) {
+        $query->where('routers', $router);
+    }
+    if (!empty($plan)) {
+        $query->where('plan_id', $plan);
+    }
+    if (!empty($status) && $status != '-') {
+        $query->where('status', $status);
+    }
+    if ($dateMode === 'exp_today') {
+        $query->where('expiration', date('Y-m-d'));
+    } elseif ($dateMode === 'not_expired') {
+        $query->where_gte('expiration', date('Y-m-d'));
+    }
+
+    $d = Paginator::findMany($query, ['search' => $search], 25, $append_url);
+    run_hook('view_list_billing'); #HOOK
+    $ui->assign('d', $d);
+    $ui->display('admin/plan/active.tpl');
+}
+
 switch ($action) {
     case 'sync':
         if (!in_array($admin['user_type'], ['SuperAdmin', 'Admin'])) {
@@ -1092,6 +1153,9 @@ switch ($action) {
             $planQuery = ORM::for_table('tbl_plans')->where('enabled', '1')->where('type', 'Balance');
         }
         $ui->assign('p', Tenant::scopeIfTenant($planQuery)->find_many());
+        if (isset($routes['2']) && !empty($routes['2'])) {
+            $ui->assign('cust', fnp_plan_customer($routes['2']));
+        }
         run_hook('view_deposit'); #HOOK
         $ui->display('admin/plan/deposit.tpl');
         break;
@@ -1151,6 +1215,18 @@ switch ($action) {
             r2(getUrl('plan/refill'), 'e', "All field is required");
         }
         break;
+    case 'list':
+        fnp_plan_render_recharge_list(Lang::T('Active Customers'));
+        break;
+    case 'exp_today':
+        fnp_plan_render_recharge_list(Lang::T('Expiring Today'), 'exp_today', 'on');
+        break;
+    case 'not_expired':
+        fnp_plan_render_recharge_list(Lang::T('Not Expired'), 'not_expired', 'on');
+        break;
+    case 'exp_query':
+        fnp_plan_render_recharge_list(Lang::T('Expiration Tracker'));
+        break;
     case 'extend':
         $id = $routes[2];
         $days = $routes[3];
@@ -1207,50 +1283,6 @@ switch ($action) {
         }
         break;
     default:
-        $ui->assign('_title', Lang::T('Customer'));
-        $search = _post('search');
-        $status = _req('status');
-        $router = _req('router');
-        $plan = _req('plan');
-        $append_url = "&search=" . urlencode($search)
-            . "&status=" . urlencode($status)
-            . "&router=" . urlencode($type3)
-            . "&plan=" . urlencode($plan);
-        $ui->assign('append_url', $append_url);
-        $ui->assign('plan', $plan);
-        $ui->assign('status', $status);
-        $ui->assign('router', $router);
-        $ui->assign('search', $search);
-        $routersQuery = ORM::for_table('tbl_user_recharges')->distinct()->select("routers")->whereNotEqual('routers', '');
-        $ui->assign('routers', array_column(Tenant::scopeIfTenant($routersQuery)->findArray(), 'routers'));
-
-        $plansUsedQuery = ORM::for_table('tbl_user_recharges')->distinct()->select("plan_id");
-        $plns = Tenant::scopeIfTenant($plansUsedQuery)->findArray();
-        $ids = array_column($plns, 'plan_id');
-        if (count($ids)) {
-            $activePlanQuery = ORM::for_table('tbl_plans')->select("id")->select('name_plan')->where_id_in($ids);
-            $ui->assign('plans', Tenant::scopeIfTenant($activePlanQuery)->findArray());
-        } else {
-            $ui->assign('plans', []);
-        }
-        $query = ORM::for_table('tbl_user_recharges')->order_by_desc('id');
-        $query = Tenant::scopeIfTenant($query);
-
-        if ($search != '') {
-            $query->where_like("username", "%$search%");
-        }
-        if (!empty($router)) {
-            $query->where('routers', $router);
-        }
-        if (!empty($plan)) {
-            $query->where('plan_id', $plan);
-        }
-        if (!empty($status) && $status != '-') {
-            $query->where('status', $status);
-        }
-        $d = Paginator::findMany($query, ['search' => $search], 25, $append_url);
-        run_hook('view_list_billing'); #HOOK
-        $ui->assign('d', $d);
-        $ui->display('admin/plan/active.tpl');
+        fnp_plan_render_recharge_list(Lang::T('Customer'));
         break;
 }

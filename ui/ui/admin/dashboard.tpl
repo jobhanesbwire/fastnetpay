@@ -94,6 +94,48 @@
             <div class="alert alert-warning">SaaS analytics could not load: {$saas_analytics_error|escape}</div>
         {/if}
 
+        {if isset($ops_analytics)}
+            <section class="fnp-saas-dashboard-strip">
+                <div class="fnp-saas-strip-head">
+                    <div>
+                        <span class="fnp-dashboard-kicker"><i class="fa fa-briefcase"></i> Operations</span>
+                        <h2>Counter, Support & Device Signals</h2>
+                    </div>
+                    <a href="{Text::url('pos/dashboard')}" class="btn btn-success btn-sm"><i class="fa fa-shopping-cart"></i> POS</a>
+                </div>
+                <div class="row">
+                    <div class="col-md-3 col-sm-6">
+                        <div class="fnp-saas-card fnp-saas-kpi">
+                            <span>POS Today</span>
+                            <b>{Lang::moneyFormat($ops_analytics.pos_today)}</b>
+                            <small>{Lang::moneyFormat($ops_analytics.pos_month)} this month</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                        <div class="fnp-saas-card fnp-saas-kpi">
+                            <span>Open Tickets</span>
+                            <b>{$ops_analytics.open_tickets}</b>
+                            <small>{$ops_analytics.urgent_tickets} urgent ticket(s)</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                        <div class="fnp-saas-card fnp-saas-kpi">
+                            <span>ACS Devices</span>
+                            <b>{$ops_analytics.acs_devices}</b>
+                            <small>customer CPE registry</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                        <div class="fnp-saas-card fnp-saas-kpi">
+                            <span>PPPoE Wallets</span>
+                            <b>{Lang::moneyFormat($ops_analytics.pppoe_balance)}</b>
+                            <small>total customer balance</small>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        {/if}
+
         {assign rows explode(".", $_c[$dtipe])}
     {assign pos 1}
     {foreach $rows as $cols}

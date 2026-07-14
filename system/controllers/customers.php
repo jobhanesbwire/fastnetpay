@@ -1011,10 +1011,18 @@ function customers_pppoe_summary()
 {
     $total = Tenant::scopeIfTenant(ORM::for_table('tbl_customers')->where('service_type', 'PPPoE'));
     $inactive = Tenant::scopeIfTenant(ORM::for_table('tbl_customers')->where('service_type', 'PPPoE')->where_not_equal('status', 'Active'));
+    $balanceQuery = ORM::for_table('tbl_customers')
+        ->select_expr('COALESCE(SUM(balance),0)', 'balance_total')
+        ->select_expr('SUM(CASE WHEN balance > 0 THEN 1 ELSE 0 END)', 'with_balance')
+        ->where('service_type', 'PPPoE');
+    $balanceQuery = Tenant::scopeIfTenant($balanceQuery);
+    $balance = $balanceQuery->find_one();
     return [
         'total' => (int) $total->count(),
         'not_expired' => customers_count_recharge(['status' => 'on', 'not_expired' => true]),
         'expired' => customers_count_recharge(['expired' => true]),
         'inactive' => (int) $inactive->count(),
+        'balance_total' => (float) ($balance['balance_total'] ?? 0),
+        'with_balance' => (int) ($balance['with_balance'] ?? 0),
     ];
 }
