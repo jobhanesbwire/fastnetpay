@@ -37,11 +37,11 @@ Current production status:
 - Router backups were created before any SSTP test commands:
   - `/export file=before_fastnetpay_sstp`
   - `/system backup save name=before_fastnetpay_sstp`
-- SSTP server installation is not complete yet because the current Ubuntu package sources did not provide a maintained SSTP/accel-ppp server package.
+- SSTP server installation is handled by `scripts/production/install-sstp-accel-ppp.sh`, which builds `accel-ppp` and creates `fastnetpay-sstp.service`.
 
 Blocked item:
 
-Do not open `4443/tcp` or push SSTP client commands until a maintained server implementation is installed, configured with the wildcard certificate, and assigned per-router accounts/IPs.
+Do not push SSTP client commands until the server is installed, listening on `4443/tcp`, and the router has a unique account/IP from `scripts/production/add-sstp-router.sh`.
 
 Minimum server requirements:
 
@@ -53,3 +53,5 @@ Minimum server requirements:
 - Service enabled at boot.
 
 After the server is ready, record the RB951 in FASTNETPAY using its SSTP VPN IP, not the public WAN IP.
+
+See also: `docs/SSTP-PRODUCTION-SERVER.md`.

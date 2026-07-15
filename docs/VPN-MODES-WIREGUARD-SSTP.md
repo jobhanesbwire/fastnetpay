@@ -33,6 +33,25 @@ RB951 test result: the tested RB951Ui-2HnD is running RouterOS `6.49.19 (long-te
 
 Use this for older RouterOS v6 routers that do not support WireGuard. Configure the SSTP server on the FASTNETPAY/VPS side first, then enter the SSTP server, username, and password in the wizard.
 
+Production server setup is documented in:
+
+```text
+docs/SSTP-PRODUCTION-SERVER.md
+```
+
+FASTNETPAY provides:
+
+- `scripts/production/install-sstp-accel-ppp.sh` to install/configure `accel-ppp`.
+- `scripts/production/add-sstp-router.sh` to create one unique SSTP account per router.
+
+Recommended SSTP endpoint:
+
+```text
+sstp.fastnetpay.co.ke:4443/tcp
+```
+
+Keep this DNS record DNS-only, never Cloudflare-proxied.
+
 ## Security Rule
 
 When VPN is tested, enable “Restrict RouterOS API to the VPN server IP”. Do not expose MikroTik API directly to the public internet.

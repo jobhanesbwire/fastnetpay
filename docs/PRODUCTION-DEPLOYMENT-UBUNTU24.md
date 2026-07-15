@@ -79,6 +79,22 @@ sudo ufw enable
 
 Do not expose MySQL, phpMyAdmin, MikroTik API, RADIUS, or Docker daemon ports to the internet.
 
+For production router management:
+
+- WireGuard uses `51820/udp` and is recommended for RouterOS v7.
+- SSTP uses `4443/tcp` and is the fallback for RouterOS v6 routers such as RB951.
+- Do not expose MikroTik API/Winbox/SSH publicly; reach routers through VPN IPs.
+
+SSTP installation:
+
+```bash
+cd /opt/fastnetpay/app
+bash scripts/production/install-sstp-accel-ppp.sh
+bash scripts/production/add-sstp-router.sh fastnet-rb951-001 10.100.1.1
+```
+
+Full SSTP guide: `docs/SSTP-PRODUCTION-SERVER.md`.
+
 ## Cloudflare Readiness
 
 When Cloudflare is in front of the VPS:
