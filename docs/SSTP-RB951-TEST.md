@@ -1,0 +1,55 @@
+# SSTP RB951 Test
+
+SSTP is the recommended fallback for the tested MikroTik RB951 running RouterOS `6.49.19 (long-term)`.
+
+Required DNS:
+
+```text
+sstp.fastnetpay.co.ke A 212.95.35.229 DNS-only
+```
+
+Recommended port:
+
+```text
+4443/tcp
+```
+
+Before testing on the router:
+
+```routeros
+/export file=before_fastnetpay_sstp
+/system backup save name=before_fastnetpay_sstp
+```
+
+Template MikroTik command:
+
+```routeros
+/interface sstp-client add name=sstp-fastnetpay connect-to=sstp.fastnetpay.co.ke port=4443 user=ROUTER_SPECIFIC_USERNAME password=ROUTER_SPECIFIC_PASSWORD profile=default-encryption verify-server-certificate=yes add-default-route=no disabled=no
+```
+
+Do not replace the router's default route. The SSTP tunnel is for FASTNETPAY management/API traffic only.
+
+Current production status:
+
+- DNS target: `sstp.fastnetpay.co.ke` should resolve directly to `212.95.35.229`.
+- Recommended public port: `4443/tcp`.
+- RB951 local API test succeeded on `192.168.88.1`.
+- Router backups were created before any SSTP test commands:
+  - `/export file=before_fastnetpay_sstp`
+  - `/system backup save name=before_fastnetpay_sstp`
+- SSTP server installation is not complete yet because the current Ubuntu package sources did not provide a maintained SSTP/accel-ppp server package.
+
+Blocked item:
+
+Do not open `4443/tcp` or push SSTP client commands until a maintained server implementation is installed, configured with the wildcard certificate, and assigned per-router accounts/IPs.
+
+Minimum server requirements:
+
+- Unique username/password per router.
+- Fixed or traceable VPN IP per router.
+- Strong TLS certificate.
+- Authentication failure rate limiting.
+- Log rotation.
+- Service enabled at boot.
+
+After the server is ready, record the RB951 in FASTNETPAY using its SSTP VPN IP, not the public WAN IP.
