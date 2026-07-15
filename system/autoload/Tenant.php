@@ -12,6 +12,7 @@ class Tenant
     private static $booted = false;
     private static $current = null;
     private static $mode = 'main';
+    private static $unknownTenantHost = '';
     private static $columnCache = [];
     private static $tenantCache = [];
     private static $settingsCache = [];
@@ -24,7 +25,15 @@ class Tenant
         }
 
         self::installSchema();
+        self::$unknownTenantHost = '';
         self::$current = self::resolveFromHost($config);
+        if (self::$unknownTenantHost !== '') {
+            self::$mode = 'unknown';
+            $_SESSION['resolved_tenant_id'] = 0;
+            $_SESSION['resolved_tenant_mode'] = self::$mode;
+            self::$booted = true;
+            return;
+        }
         if (!self::$current) {
             self::$current = self::defaultTenant();
         }
@@ -239,6 +248,16 @@ class Tenant
         return self::$mode === 'tenant';
     }
 
+    public static function isUnknownTenantRequest()
+    {
+        return self::$mode === 'unknown';
+    }
+
+    public static function unknownTenantHost()
+    {
+        return self::$unknownTenantHost;
+    }
+
     public static function isDefaultTenant($tenant = null)
     {
         $tenant = $tenant ?: self::current();
@@ -336,11 +355,13 @@ class Tenant
 
         if (substr($host, -strlen('.' . $base)) === '.' . $base) {
             $subdomain = substr($host, 0, -strlen('.' . $base));
-            if (strpos($subdomain, '.') === false && $subdomain !== '' && $subdomain !== 'www') {
+            if (strpos($subdomain, '.') === false && $subdomain !== '' && !in_array($subdomain, self::reservedSubdomains(), true)) {
                 $tenant = ORM::for_table('tenants')->where('subdomain', $subdomain)->find_one();
                 if ($tenant) {
                     return self::$tenantCache[$cacheKey] = $tenant;
                 }
+                self::$unknownTenantHost = $host;
+                return self::$tenantCache[$cacheKey] = null;
             }
         }
 
@@ -642,6 +663,9 @@ class Tenant
         if ($slug === '' || $subdomain === '') {
             throw new Exception('Tenant slug and subdomain are required.');
         }
+        if (in_array($slug, self::reservedSubdomains(), true) || in_array($subdomain, self::reservedSubdomains(), true)) {
+            throw new Exception('This tenant slug or subdomain is reserved for FASTNETPAY infrastructure.');
+        }
         if (ORM::for_table('tenants')->where('slug', $slug)->find_one()) {
             throw new Exception('Tenant slug already exists.');
         }
@@ -670,6 +694,9 @@ class Tenant
         }
         $slug = self::slug($data['slug'] ?: $tenant['slug']);
         $subdomain = self::slug($data['subdomain'] ?: $tenant['subdomain']);
+        if (in_array($slug, self::reservedSubdomains(), true) || in_array($subdomain, self::reservedSubdomains(), true)) {
+            throw new Exception('This tenant slug or subdomain is reserved for FASTNETPAY infrastructure.');
+        }
         $exists = ORM::for_table('tenants')->where('slug', $slug)->where_not_equal('id', (int) $tenant['id'])->find_one();
         if ($exists) {
             throw new Exception('Tenant slug already exists.');
@@ -956,6 +983,28 @@ class Tenant
         $value = strtolower(trim((string) $value));
         $value = preg_replace('/[^a-z0-9]+/', '-', $value);
         return trim($value, '-');
+    }
+
+    public static function reservedSubdomains()
+    {
+        return [
+            'mother',
+            'www',
+            'api',
+            'vpn',
+            'portainer',
+            'admin',
+            'mail',
+            'smtp',
+            'ftp',
+            'docs',
+            'support',
+            'status',
+            'monitor',
+            'callback',
+            'assets',
+            'static',
+        ];
     }
 
     private static function domain($value)

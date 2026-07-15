@@ -401,6 +401,7 @@ class RouterProvisioning
             'vpn_server_ip' => '10.100.0.1',
             'vpn_router_ip' => '10.100.1.1',
             'vpn_port' => '51820',
+            'wireguard_endpoint' => 'vpn.fastnetpay.co.ke',
             'wireguard_public_key' => '',
             'wireguard_private_key' => '',
             'sstp_server' => '',
@@ -488,6 +489,7 @@ class RouterProvisioning
         $clean['vpn_server_ip'] = self::ip($clean['vpn_server_ip'], '10.100.0.1');
         $clean['vpn_router_ip'] = self::ip($clean['vpn_router_ip'], '10.100.1.1');
         $clean['vpn_port'] = (string) self::port($clean['vpn_port'], 51820);
+        $clean['wireguard_endpoint'] = self::cleanText($clean['wireguard_endpoint'] ?? 'vpn.fastnetpay.co.ke', 190);
         $clean['secure_management_url'] = self::cleanUrl($clean['secure_management_url']);
         $clean['tenant_id'] = (string) max(0, (int) $clean['tenant_id']);
         $clean['site_id'] = (string) max(0, (int) $clean['site_id']);
@@ -612,6 +614,18 @@ class RouterProvisioning
         $wifi = self::safeRows($client, '/interface/wifi/print');
 
         $version = self::prop($resource, 'version');
+        $major = self::routerOsMajor($version);
+        $wireguardSupported = false;
+        $wireguardMessage = 'WireGuard is not available on this RouterOS build.';
+        try {
+            self::rows($client, '/interface/wireguard/print');
+            $wireguardSupported = true;
+            $wireguardMessage = 'WireGuard is available.';
+        } catch (Throwable $e) {
+            if ($major >= 7) {
+                $wireguardMessage = 'RouterOS v7 detected, but WireGuard API path is unavailable: ' . self::redact($e->getMessage());
+            }
+        }
         $warnings = [];
         if (trim((string) $settings['password']) === '' && (!$router || trim((string) $router['password']) === '')) {
             $warnings[] = 'Bootstrap/admin password is empty. This is allowed only for reset-lab testing. FASTNETPAY will use fastnet-api-usr after it is created.';
@@ -628,14 +642,22 @@ class RouterProvisioning
         if (count($wireless) === 0 && count($wifi) === 0) {
             $warnings[] = 'No wireless interface detected. Hotspot will be configured on the selected LAN/Hotspot interface. Use an external AP broadcasting FastNet Test.';
         }
+        if (!$wireguardSupported) {
+            $warnings[] = 'WireGuard is not available on this router. Use Default Local Setup now or SSTP VPN for remote RouterOS v6 management.';
+        }
 
         return [
             'ok' => true,
             'version' => $version,
-            'major' => self::routerOsMajor($version),
+            'major' => $major,
             'board_name' => self::prop($resource, 'board-name'),
             'platform' => self::prop($resource, 'platform'),
             'identity' => self::prop($identity, 'name'),
+            'vpn' => [
+                'wireguard_supported' => $wireguardSupported,
+                'recommended_mode' => $wireguardSupported ? 'wireguard' : ($major > 0 && $major < 7 ? 'sstp' : 'local'),
+                'message' => $wireguardMessage,
+            ],
             'api_user' => [
                 'username' => self::API_USERNAME,
                 'status' => $api['status'],
@@ -1744,13 +1766,15 @@ class RouterProvisioning
 
             if ($mode === 'wireguard') {
                 $port = self::port($settings['vpn_port'] ?? 51820, 51820);
+                $endpoint = self::cleanText($settings['wireguard_endpoint'] ?? 'vpn.fastnetpay.co.ke', 190);
                 $privateKey = trim((string) ($settings['wireguard_private_key'] ?? ''));
                 $publicKey = trim((string) ($settings['wireguard_public_key'] ?? ''));
                 $commands[] = '# WireGuard requires RouterOS v7. If this router is v6, use SSTP mode.';
+                $commands[] = '# WireGuard endpoint must be DNS-only, not Cloudflare proxied: ' . $endpoint . ':' . (int) $port;
                 $commands[] = ':do {:if ([:len [/interface wireguard find name=' . self::q('fastnetpay-wg') . ']] = 0) do={/interface wireguard add name=' . self::q('fastnetpay-wg') . ' listen-port=' . (int) $port . ($privateKey !== '' ? ' private-key=' . self::q($privateKey) : '') . ' comment=' . self::q('FASTNETPAY WireGuard management tunnel') . '} else={/interface wireguard set [find name=' . self::q('fastnetpay-wg') . '] listen-port=' . (int) $port . ' comment=' . self::q('FASTNETPAY WireGuard management tunnel') . '}} on-error={:log warning ' . self::q('FASTNETPAY WireGuard is not supported on this RouterOS version') . '}';
                 $commands[] = ':do {:if ([:len [/ip address find address=' . self::q($routerIp . '/16') . ']] = 0) do={/ip address add address=' . self::q($routerIp . '/16') . ' interface=' . self::q('fastnetpay-wg') . ' comment=' . self::q('FASTNETPAY WireGuard router IP') . '}} on-error={:log warning ' . self::q('FASTNETPAY WireGuard IP could not be assigned') . '}';
                 if ($publicKey !== '') {
-                    $commands[] = ':do {:if ([:len [/interface wireguard peers find comment=' . self::q('FASTNETPAY WireGuard server peer') . ']] = 0) do={/interface wireguard peers add interface=' . self::q('fastnetpay-wg') . ' public-key=' . self::q($publicKey) . ' allowed-address=' . self::q($serverIp . '/32') . ' persistent-keepalive=25s comment=' . self::q('FASTNETPAY WireGuard server peer') . '}} on-error={:log warning ' . self::q('FASTNETPAY WireGuard peer could not be added') . '}';
+                    $commands[] = ':do {:if ([:len [/interface wireguard peers find comment=' . self::q('FASTNETPAY WireGuard server peer') . ']] = 0) do={/interface wireguard peers add interface=' . self::q('fastnetpay-wg') . ' public-key=' . self::q($publicKey) . ' endpoint-address=' . self::q($endpoint) . ' endpoint-port=' . (int) $port . ' allowed-address=' . self::q($serverIp . '/32') . ' persistent-keepalive=25s comment=' . self::q('FASTNETPAY WireGuard server peer') . '} else={/interface wireguard peers set [find comment=' . self::q('FASTNETPAY WireGuard server peer') . '] endpoint-address=' . self::q($endpoint) . ' endpoint-port=' . (int) $port . ' allowed-address=' . self::q($serverIp . '/32') . ' persistent-keepalive=25s}} on-error={:log warning ' . self::q('FASTNETPAY WireGuard peer could not be added') . '}';
                 } else {
                     $commands[] = '# Paste the FASTNETPAY/VPS WireGuard public key to let the wizard add the server peer automatically.';
                 }
@@ -2927,6 +2951,14 @@ class RouterProvisioning
         $response = $client->sendSync(new RouterOS\Request($path));
         $rows = [];
         foreach ($response as $row) {
+            if (method_exists($row, 'getType')) {
+                if ($row->getType() === RouterOS\Response::TYPE_ERROR || $row->getType() === RouterOS\Response::TYPE_FATAL) {
+                    throw new Exception($path . ': ' . self::prop($row, 'message', 'RouterOS returned an error'));
+                }
+                if ($row->getType() !== RouterOS\Response::TYPE_DATA) {
+                    continue;
+                }
+            }
             $rows[] = $row;
         }
         return $rows;

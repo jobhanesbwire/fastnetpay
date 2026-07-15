@@ -25,6 +25,17 @@ Local database settings:
 
 This root database user is for local development only. Production should use a dedicated non-root MySQL user, strong secrets, `APP_STAGE=Live`, and `APP_DISPLAY_ERRORS=0`.
 
+## Production Docker Setup
+
+For an Ubuntu 24 VPS, use the separate production stack so MySQL is private, phpMyAdmin is not exposed, PHP errors are hidden, and Nginx applies public request throttling:
+
+```bash
+cp .env.production.example .env.production
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+```
+
+Read [PRODUCTION-DEPLOYMENT-UBUNTU24.md](docs/PRODUCTION-DEPLOYMENT-UBUNTU24.md) before going live.
+
 ## Local Setup Notes
 
 - `config.php` is generated for this local Docker setup and is ignored by Git because it contains local credentials.

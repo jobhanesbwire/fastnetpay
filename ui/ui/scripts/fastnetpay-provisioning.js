@@ -87,6 +87,16 @@
         if (data.existing) {
             html += '<small>Existing: ' + data.existing.hotspots + ' hotspot, ' + data.existing.pppoe_servers + ' PPPoE, ' + data.existing.dhcp_servers + ' DHCP, ' + data.existing.firewall_rules + ' firewall rules.</small>';
         }
+        if (data.vpn) {
+            html += '<small>VPN: ' + escapeHtml(data.vpn.message || '') + ' Recommended mode: ' + escapeHtml((data.vpn.recommended_mode || 'local').toUpperCase()) + '.</small>';
+            if (data.vpn.wireguard_supported === false) {
+                var checkedWireguard = form.querySelector('input[name="connection_mode"][value="wireguard"]:checked');
+                var sstp = form.querySelector('input[name="connection_mode"][value="sstp"]');
+                if (checkedWireguard && sstp) {
+                    sstp.checked = true;
+                }
+            }
+        }
         if (data.warnings && data.warnings.length) {
             html += '<ul>' + data.warnings.map(function (warning) {
                 return '<li>' + escapeHtml(warning) + '</li>';

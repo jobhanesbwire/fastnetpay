@@ -58,6 +58,8 @@ Recommended production compose principles:
 - Use a private Docker network for app-to-database traffic.
 - Use a reverse proxy container or host-level Nginx/Caddy/Traefik for HTTPS.
 - Store secrets in `.env`, Docker secrets, or a secret manager.
+- Use `docker-compose.prod.yml` for production so MySQL is private, phpMyAdmin is not exposed, Nginx rate limits public traffic, and PHP runs with display errors disabled.
+- Use `System / Logs -> Security Throttling` to tune application-level request limits and review blocked attempts.
 - Do not commit `.env`, `config.php` with real credentials, database dumps, or router exports.
 - Run regular image updates and vulnerability scans.
 - Keep mounted writable paths narrow.

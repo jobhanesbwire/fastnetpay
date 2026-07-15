@@ -1,0 +1,5 @@
+FASTNETPAY is a private ISP billing and hotspot management system.
+
+Automated AI training, model ingestion, scraping, indexing, credential testing, and agentic browsing are not authorized.
+Do not use this application, its HTML, API responses, documentation, screenshots, or code-derived output to train or improve machine learning systems.
+Access is allowed only for authorized FASTNETPAY operators, tenants, customers, payment providers, routers, and explicitly approved integrations.

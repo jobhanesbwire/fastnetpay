@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 
 # Local PHPNuxBill credentials. Keep config.sample.php committed.
 config.php
@@ -43,3 +44,5 @@ backups/
 
 # Docker/local overrides.
 docker-compose.override.yml
+.docker/nginx/certs/*
+!.docker/nginx/certs/.gitkeep

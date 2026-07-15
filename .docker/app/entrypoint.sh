@@ -3,6 +3,12 @@ set -e
 
 APP_DIR=/var/www/html
 
+if [ ! -f "$APP_DIR/config.php" ] && [ -f "$APP_DIR/config.sample.php" ]; then
+    cp "$APP_DIR/config.sample.php" "$APP_DIR/config.php"
+    chown www-data:www-data "$APP_DIR/config.php" 2>/dev/null || true
+    chmod 640 "$APP_DIR/config.php" 2>/dev/null || true
+fi
+
 if [ -f "$APP_DIR/system/composer.json" ] && [ ! -f "$APP_DIR/system/vendor/autoload.php" ]; then
     composer install --working-dir="$APP_DIR/system" --no-dev --no-interaction --prefer-dist --optimize-autoloader
 fi

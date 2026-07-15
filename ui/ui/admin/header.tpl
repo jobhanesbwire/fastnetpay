@@ -629,7 +629,7 @@
                     </li>
 
                     {if in_array($_admin['user_type'],['SuperAdmin','Admin'])}
-                            <li class="{if ($_routes[0] eq 'logs' && $_routes[1] neq 'message') || $_routes[0] eq 'expiry'}active{/if} treeview">
+                            <li class="{if ($_routes[0] eq 'logs' && $_routes[1] neq 'message') || $_routes[0] eq 'expiry' || $_routes[0] eq 'security'}active{/if} treeview">
                             <a href="#">
                                 <i class="ion ion-clock"></i> <span>System / Logs</span>
                                 <span class="pull-right-container"><i class="fa fa-angle-left pull-right"></i></span>
@@ -638,6 +638,7 @@
                                     <li {if $_routes[0] eq 'logs' && ($_routes[1] eq '' || $_routes[1] eq 'list') && _req('q') eq ''}class="active"{/if}><a href="{Text::url('logs/list')}">FASTNETPAY Logs</a></li>
                                     <li {if $_routes[0] eq 'logs' && $_routes[1] eq 'list' && _req('q') eq 'error'}class="active"{/if}><a href="{Text::url('logs/list&q=error')}">Error Logs</a></li>
                                     <li {if $_routes[0] eq 'logs' && $_routes[1] eq 'list' && _req('q') eq 'security'}class="active"{/if}><a href="{Text::url('logs/list&q=security')}">Security Logs</a></li>
+                                    <li {if $_routes[0] eq 'security'}class="active"{/if}><a href="{Text::url('security/throttle')}">Security Throttling</a></li>
                                     {if $_c['radius_enable']}
                                         <li {if $_routes[0] eq 'logs' && $_routes[1] eq 'radius'}class="active"{/if}><a href="{Text::url('logs/radius')}">Radius Logs</a></li>
                                     {/if}

@@ -137,6 +137,10 @@ $envOverrides = [
     'APP_BASE_DOMAIN' => 'saas_base_domain',
     'APP_LOCAL_DOMAIN' => 'saas_local_domain',
     'TENANT_LOCAL_TESTING' => 'tenant_local_testing',
+    'SECURITY_THROTTLE_ENABLED' => 'security_throttle_enabled',
+    'SECURITY_TRUST_PROXY_HEADERS' => 'security_trust_proxy_headers',
+    'SECURITY_AI_BOT_BLOCK_ENABLED' => 'security_ai_bot_block_enabled',
+    'SECURITY_ROBOTS_HEADERS_ENABLED' => 'security_robots_headers_enabled',
 ];
 foreach ($envOverrides as $envKey => $configKey) {
     $envValue = getenv($envKey);

@@ -241,6 +241,7 @@
                             <label>FASTNETPAY/VPN Server IP <input type="text" name="vpn_server_ip" class="form-control" value="{$settings.vpn_server_ip|escape}" placeholder="10.100.0.1"></label>
                             <label>Router VPN IP <input type="text" name="vpn_router_ip" class="form-control" value="{$settings.vpn_router_ip|escape}" placeholder="10.100.1.1"></label>
                             <label>WireGuard Listen Port <input type="number" name="vpn_port" class="form-control" value="{$settings.vpn_port|escape}" min="1" max="65535"></label>
+                            <label>WireGuard Endpoint Host <input type="text" name="wireguard_endpoint" class="form-control" value="{$settings.wireguard_endpoint|escape}" placeholder="vpn.fastnetpay.co.ke"><small class="fnp-provision-muted">Use DNS-only. Cloudflare proxied records cannot carry WireGuard UDP.</small></label>
                             <label>Secure Management URL <input type="url" name="secure_management_url" class="form-control" value="{$settings.secure_management_url|escape}" placeholder="https://fastnetpay.co.ke:3054"></label>
                             <label>WireGuard Router Private Key <input type="password" name="wireguard_private_key" class="form-control" value="{$settings.wireguard_private_key|escape}" autocomplete="new-password"></label>
                             <label>WireGuard FASTNETPAY Public Key <input type="text" name="wireguard_public_key" class="form-control" value="{$settings.wireguard_public_key|escape}"></label>

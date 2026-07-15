@@ -4826,3 +4826,82 @@ body {
 .dark-mode .fnp-saas-kpi span {
     color: var(--fnp-muted);
 }
+
+.fnp-summary-row {
+    margin-bottom: 16px;
+}
+
+.fnp-summary-card {
+    align-items: center;
+    background: var(--fnp-white);
+    border: 1px solid rgba(31, 41, 51, 0.08);
+    border-radius: 10px;
+    box-shadow: 0 10px 24px rgba(31, 41, 51, 0.08);
+    display: flex;
+    gap: 12px;
+    margin-bottom: 14px;
+    min-height: 86px;
+    padding: 16px;
+}
+
+.fnp-summary-card small,
+.fnp-summary-card strong {
+    display: block;
+}
+
+.fnp-summary-card small {
+    color: var(--fnp-muted);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.fnp-summary-card strong {
+    color: var(--fnp-dark);
+    font-size: 24px;
+    font-weight: 900;
+    line-height: 1.1;
+}
+
+.fnp-summary-icon {
+    align-items: center;
+    border-radius: 10px;
+    color: #fff;
+    display: inline-flex;
+    flex: 0 0 44px;
+    font-size: 18px;
+    height: 44px;
+    justify-content: center;
+    width: 44px;
+}
+
+.fnp-green {
+    background: var(--fnp-primary);
+}
+
+.fnp-yellow {
+    background: var(--fnp-secondary);
+    color: #1f2933;
+}
+
+.fnp-red {
+    background: var(--fnp-danger);
+}
+
+.fnp-blue {
+    background: var(--fnp-info);
+}
+
+.fnp-security-page code {
+    background: rgba(65, 161, 70, 0.08);
+    color: var(--fnp-primary-dark);
+}
+
+.dark-mode .fnp-summary-card {
+    background: var(--fnp-card-bg);
+    border-color: rgba(250, 204, 21, 0.16);
+}
+
+.dark-mode .fnp-summary-card strong {
+    color: #f8fafc;
+}

@@ -91,6 +91,16 @@ if ($handler == '') {
 if (class_exists('PerformanceProfiler')) {
     PerformanceProfiler::setRoute($req);
 }
+if (class_exists('SecurityThrottle')) {
+    SecurityThrottle::boot($config, $req);
+}
+if (class_exists('Tenant') && Tenant::isUnknownTenantRequest()) {
+    http_response_code(404);
+    $ui->assign('_title', 'ISP Portal Not Found');
+    $ui->assign('_unknown_tenant_host', Tenant::unknownTenantHost());
+    $ui->display('tenant-not-found.tpl');
+    exit;
+}
 try {
     if (!empty($_GET['uid'])) {
         $_COOKIE['uid'] = $_GET['uid'];
