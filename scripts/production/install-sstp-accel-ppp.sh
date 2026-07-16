@@ -88,7 +88,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=$(command -v accel-pppd) -f -c ${CONF_FILE}
+ExecStart=$(command -v accel-pppd) -c ${CONF_FILE}
 Restart=always
 RestartSec=5
 LimitNOFILE=1048576
