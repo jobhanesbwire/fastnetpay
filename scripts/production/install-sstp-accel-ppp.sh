@@ -12,6 +12,7 @@ SSTP_LOCAL_IP="${SSTP_LOCAL_IP:-10.100.0.1}"
 SSTP_POOL="${SSTP_POOL:-10.100.200.10-254}"
 SSTP_CERT_FILE="${SSTP_CERT_FILE:-/etc/letsencrypt/live/fastnetpay.co.ke/fullchain.pem}"
 SSTP_KEY_FILE="${SSTP_KEY_FILE:-/etc/letsencrypt/live/fastnetpay.co.ke/privkey.pem}"
+SSTP_CA_FILE="${SSTP_CA_FILE:-/etc/letsencrypt/live/fastnetpay.co.ke/chain.pem}"
 ACCEL_REPO="${ACCEL_REPO:-https://github.com/xebd/accel-ppp.git}"
 ACCEL_REF="${ACCEL_REF:-master}"
 SRC_DIR="${SRC_DIR:-/usr/local/src/fastnetpay-accel-ppp}"
@@ -20,10 +21,11 @@ CONF_FILE="${CONF_DIR}/accel-ppp.conf"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TEMPLATE="${REPO_ROOT}/.docker/sstp/accel-ppp.conf"
 
-if [ ! -f "$SSTP_CERT_FILE" ] || [ ! -f "$SSTP_KEY_FILE" ]; then
+if [ ! -f "$SSTP_CERT_FILE" ] || [ ! -f "$SSTP_KEY_FILE" ] || [ ! -f "$SSTP_CA_FILE" ]; then
   echo "Missing TLS certificate files:" >&2
   echo "  $SSTP_CERT_FILE" >&2
   echo "  $SSTP_KEY_FILE" >&2
+  echo "  $SSTP_CA_FILE" >&2
   echo "Issue the FASTNETPAY wildcard certificate before installing SSTP." >&2
   exit 1
 fi
@@ -71,6 +73,7 @@ sed \
   -e "s|{{SSTP_POOL}}|${SSTP_POOL}|g" \
   -e "s|{{SSTP_CERT_FILE}}|${SSTP_CERT_FILE}|g" \
   -e "s|{{SSTP_KEY_FILE}}|${SSTP_KEY_FILE}|g" \
+  -e "s|{{SSTP_CA_FILE}}|${SSTP_CA_FILE}|g" \
   "$TEMPLATE" > "$CONF_FILE"
 chmod 600 "$CONF_FILE"
 
