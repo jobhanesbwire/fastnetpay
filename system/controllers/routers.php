@@ -5,18 +5,50 @@
  *  by https://t.me/ibnux
  **/
 
+$action = $routes['1'] ?? '';
+$provisionJsonActions = [
+    'provision-detect',
+    'provision-preview',
+    'provision-run',
+    'provision-status',
+    'provision-final-test',
+    'provision-refresh-portal',
+    'provision-bootstrap',
+];
+
+if (in_array($action, $provisionJsonActions, true) && !Admin::getID()) {
+    RouterProvisioning::json([
+        'ok' => false,
+        'message' => 'Your admin session expired while provisioning. Please log in again, reopen the wizard, and rerun the last step.',
+    ], 401);
+}
+
 _admin();
 $ui->assign('_title', Lang::T('Network'));
 $ui->assign('_system_menu', 'network');
 
-$action = $routes['1'];
 $ui->assign('_admin', $admin);
 
 require_once $DEVICE_PATH . DIRECTORY_SEPARATOR . "MikrotikHotspot.php";
 
 if (!in_array($admin['user_type'], ['SuperAdmin', 'Admin'])) {
+    if (in_array($action, $provisionJsonActions, true)) {
+        RouterProvisioning::json([
+            'ok' => false,
+            'message' => 'You do not have permission to run router provisioning actions.',
+        ], 403);
+    }
     _alert(Lang::T('You do not have permission to access this page'), 'danger', "dashboard");
 }
+
+$provisionPostOnly = function ($id) {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        RouterProvisioning::json([
+            'ok' => false,
+            'message' => 'This provisioning action must be run from the wizard. Refresh the wizard page and try again.',
+        ], 405);
+    }
+};
 
 $leafletpickerHeader = <<<EOT
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css">
@@ -59,12 +91,13 @@ switch ($action) {
         $ui->assign('mpesa', $mpesa);
         $ui->assign('mpesa_missing', implode(', ', $mpesa['missing']));
         $ui->assign('csrf_token', Csrf::generateAndStoreToken());
-        $ui->assign('xfooter', '<script src="' . APP_URL . '/ui/ui/scripts/fastnetpay-provisioning.js?2026.5.23"></script>');
+        $ui->assign('xfooter', '<script src="' . Text::runtimeBaseUrl() . '/ui/ui/scripts/fastnetpay-provisioning.js?2026.7.18.3"></script>');
         $ui->display('admin/routers/provision.tpl');
         break;
 
     case 'provision-detect':
         $id = (int) ($routes['2'] ?? 0);
+        $provisionPostOnly($id);
         if (!Csrf::check(_post('csrf_token'))) {
             RouterProvisioning::json(['ok' => false, 'message' => 'Invalid CSRF token. Please refresh and try again.'], 403);
         }
@@ -79,9 +112,7 @@ switch ($action) {
 
     case 'provision-preview':
         $id = (int) ($routes['2'] ?? 0);
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            r2(getUrl('routers/provision/' . $id));
-        }
+        $provisionPostOnly($id);
         if (!Csrf::check(_post('csrf_token'))) {
             RouterProvisioning::json(['ok' => false, 'message' => 'Invalid CSRF token. Please refresh and try again.'], 403);
         }
@@ -95,18 +126,45 @@ switch ($action) {
         }
         break;
 
-    case 'provision-run':
+    case 'provision-bootstrap':
         $id = (int) ($routes['2'] ?? 0);
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            r2(getUrl('routers/provision/' . $id));
-        }
+        $provisionPostOnly($id);
         if (!Csrf::check(_post('csrf_token'))) {
             RouterProvisioning::json(['ok' => false, 'message' => 'Invalid CSRF token. Please refresh and try again.'], 403);
         }
         try {
             $router = RouterProvisioning::router($id);
             $settings = RouterProvisioning::settingsFromRequest($router);
-            RouterProvisioning::json(RouterProvisioning::runProvisioning($router, $settings, $admin));
+            $bootstrap = RouterProvisioning::buildResetRouterBootstrapScript($router, $settings);
+            RouterProvisioning::json($bootstrap);
+        } catch (Throwable $e) {
+            RouterProvisioning::json(['ok' => false, 'message' => $e->getMessage()], 400);
+        }
+        break;
+
+    case 'provision-run':
+        $id = (int) ($routes['2'] ?? 0);
+        $provisionPostOnly($id);
+        if (!Csrf::check(_post('csrf_token'))) {
+            RouterProvisioning::json(['ok' => false, 'message' => 'Invalid CSRF token. Please refresh and try again.'], 403);
+        }
+        try {
+            $router = RouterProvisioning::router($id);
+            $settings = RouterProvisioning::settingsFromRequest($router);
+            RouterProvisioning::json(RouterProvisioning::queueProvisioning($router, $settings, $admin));
+        } catch (Throwable $e) {
+            RouterProvisioning::json(['ok' => false, 'message' => $e->getMessage()], 500);
+        }
+        break;
+
+    case 'provision-status':
+        $id = (int) ($routes['2'] ?? 0);
+        $provisionPostOnly($id);
+        if (!Csrf::check(_post('csrf_token'))) {
+            RouterProvisioning::json(['ok' => false, 'message' => 'Invalid CSRF token. Please refresh and try again.'], 403);
+        }
+        try {
+            RouterProvisioning::json(RouterProvisioning::provisioningStatus($id, (int) _post('run_id')));
         } catch (Throwable $e) {
             RouterProvisioning::json(['ok' => false, 'message' => $e->getMessage()], 500);
         }
@@ -114,9 +172,7 @@ switch ($action) {
 
     case 'provision-final-test':
         $id = (int) ($routes['2'] ?? 0);
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            r2(getUrl('routers/provision/' . $id));
-        }
+        $provisionPostOnly($id);
         if (!Csrf::check(_post('csrf_token'))) {
             RouterProvisioning::json(['ok' => false, 'message' => 'Invalid CSRF token. Please refresh and try again.'], 403);
         }
@@ -131,9 +187,7 @@ switch ($action) {
 
     case 'provision-refresh-portal':
         $id = (int) ($routes['2'] ?? 0);
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            r2(getUrl('routers/provision/' . $id));
-        }
+        $provisionPostOnly($id);
         if (!Csrf::check(_post('csrf_token'))) {
             RouterProvisioning::json(['ok' => false, 'message' => 'Invalid CSRF token. Please refresh and try again.'], 403);
         }

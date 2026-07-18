@@ -25,6 +25,7 @@ RUN apt-get update \
         intl \
         mbstring \
         mysqli \
+        opcache \
         pdo \
         pdo_mysql \
         zip \

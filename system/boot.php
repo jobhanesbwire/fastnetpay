@@ -21,15 +21,16 @@ function _notify($msg, $type = 'e')
 
 $ui = new Smarty();
 $ui->assign('_kolaps', $_COOKIE['kolaps']);
+$runtime_app_url = class_exists('Text') ? Text::runtimeBaseUrl() : APP_URL;
 if (!empty($config['theme']) && $config['theme'] != 'default') {
-    $_theme = APP_URL . '/' . $UI_PATH . '/themes/' . $config['theme'];
+    $_theme = $runtime_app_url . '/' . $UI_PATH . '/themes/' . $config['theme'];
     $ui->setTemplateDir([
         'custom' => File::pathFixer($UI_PATH . '/ui_custom/'),
         'theme' => File::pathFixer($UI_PATH . '/themes/' . $config['theme']),
         'default' => File::pathFixer($UI_PATH . '/ui/')
     ]);
 } else {
-    $_theme = APP_URL . '/' . $UI_PATH . '/ui';
+    $_theme = $runtime_app_url . '/' . $UI_PATH . '/ui';
     $ui->setTemplateDir([
         'custom' => File::pathFixer($UI_PATH . '/ui_custom/'),
         'default' => File::pathFixer($UI_PATH . '/ui/')
@@ -41,9 +42,9 @@ $ui->addTemplateDir($PLUGIN_PATH . File::pathFixer('/ui/'), 'plugin');
 $ui->setCompileDir(File::pathFixer($UI_PATH . '/compiled/'));
 $ui->setConfigDir(File::pathFixer($UI_PATH . '/conf/'));
 $ui->setCacheDir(File::pathFixer($UI_PATH . '/cache/'));
-$ui->assign('app_url', APP_URL);
-$ui->assign('_domain', str_replace('www.', '', parse_url(APP_URL, PHP_URL_HOST)));
-$ui->assign('_url', APP_URL . '/?_route=');
+$ui->assign('app_url', $runtime_app_url);
+$ui->assign('_domain', str_replace('www.', '', parse_url($runtime_app_url, PHP_URL_HOST)));
+$ui->assign('_url', $runtime_app_url . '/?_route=');
 $ui->assign('_path', __DIR__);
 $ui->assign('_c', $config);
 $ui->assign('_app_stage', $_app_stage);

@@ -52,6 +52,12 @@ sstp.fastnetpay.co.ke:4443/tcp
 
 Keep this DNS record DNS-only, never Cloudflare-proxied.
 
+For RB951/RouterOS v6 commands, use `connect-to=sstp.fastnetpay.co.ke:4443`. Do not add a separate `port=4443` argument. The FASTNETPAY `accel-ppp` SSTP server also leaves SNI host enforcement off because RouterOS v6 does not send SSTP client SNI.
+
+The tested RB951 required the Let's Encrypt `ISRG Root X1` certificate to be imported into RouterOS before `verify-server-certificate=yes` succeeded. The wizard now imports the root, marks it trusted, creates `sstp-fastnetpay`, adds a stable router API IP such as `10.100.1.1/32`, and allows management input from the VPS VPN IP `10.100.0.1`.
+
+Use a dedicated RSA certificate for the SSTP endpoint. The FASTNETPAY wildcard web certificate may be ECDSA, which is fine for browsers but can fail TLS handshakes on older RouterOS v6 SSTP clients.
+
 ## Security Rule
 
 When VPN is tested, enable “Restrict RouterOS API to the VPN server IP”. Do not expose MikroTik API directly to the public internet.

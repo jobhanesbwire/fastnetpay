@@ -10,9 +10,10 @@ SSTP_HOST="${SSTP_HOST:-sstp.fastnetpay.co.ke}"
 SSTP_PORT="${SSTP_PORT:-4443}"
 SSTP_LOCAL_IP="${SSTP_LOCAL_IP:-10.100.0.1}"
 SSTP_POOL="${SSTP_POOL:-10.100.200.10-254}"
-SSTP_CERT_FILE="${SSTP_CERT_FILE:-/etc/letsencrypt/live/fastnetpay.co.ke/fullchain.pem}"
-SSTP_KEY_FILE="${SSTP_KEY_FILE:-/etc/letsencrypt/live/fastnetpay.co.ke/privkey.pem}"
-SSTP_CA_FILE="${SSTP_CA_FILE:-/etc/letsencrypt/live/fastnetpay.co.ke/chain.pem}"
+SSTP_CERT_NAME="${SSTP_CERT_NAME:-sstp.fastnetpay.co.ke-rsa}"
+SSTP_CERT_FILE="${SSTP_CERT_FILE:-/etc/letsencrypt/live/${SSTP_CERT_NAME}/fullchain.pem}"
+SSTP_KEY_FILE="${SSTP_KEY_FILE:-/etc/letsencrypt/live/${SSTP_CERT_NAME}/privkey.pem}"
+SSTP_CA_FILE="${SSTP_CA_FILE:-/etc/letsencrypt/live/${SSTP_CERT_NAME}/chain.pem}"
 ACCEL_REPO="${ACCEL_REPO:-https://github.com/xebd/accel-ppp.git}"
 ACCEL_REF="${ACCEL_REF:-master}"
 SRC_DIR="${SRC_DIR:-/usr/local/src/fastnetpay-accel-ppp}"
@@ -22,11 +23,26 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TEMPLATE="${REPO_ROOT}/.docker/sstp/accel-ppp.conf"
 
 if [ ! -f "$SSTP_CERT_FILE" ] || [ ! -f "$SSTP_KEY_FILE" ] || [ ! -f "$SSTP_CA_FILE" ]; then
+  if command -v certbot >/dev/null 2>&1 && [ -f /root/.secrets/cloudflare.ini ]; then
+    certbot certonly \
+      --dns-cloudflare \
+      --dns-cloudflare-credentials /root/.secrets/cloudflare.ini \
+      --key-type rsa \
+      --rsa-key-size 2048 \
+      --cert-name "$SSTP_CERT_NAME" \
+      -d "$SSTP_HOST" \
+      --non-interactive \
+      --agree-tos \
+      -m "admin@fastnetpay.co.ke"
+  fi
+fi
+
+if [ ! -f "$SSTP_CERT_FILE" ] || [ ! -f "$SSTP_KEY_FILE" ] || [ ! -f "$SSTP_CA_FILE" ]; then
   echo "Missing TLS certificate files:" >&2
   echo "  $SSTP_CERT_FILE" >&2
   echo "  $SSTP_KEY_FILE" >&2
   echo "  $SSTP_CA_FILE" >&2
-  echo "Issue the FASTNETPAY wildcard certificate before installing SSTP." >&2
+  echo "Issue a dedicated RSA certificate for $SSTP_HOST before installing SSTP." >&2
   exit 1
 fi
 
@@ -83,6 +99,60 @@ else
   chmod 600 /etc/ppp/chap-secrets
 fi
 
+cat > /etc/ppp/ip-up.d/fastnetpay-sstp-routes <<'EOF'
+#!/bin/sh
+set -eu
+PATH=/usr/local/sbin:/usr/sbin:/sbin:/usr/local/bin:/usr/bin:/bin
+
+user="${PEERNAME:-}"
+iface="${PPP_IFACE:-${1:-}}"
+chap_file="/etc/ppp/chap-secrets"
+log_file="/var/log/fastnetpay-sstp-routes.log"
+
+[ -n "$user" ] || exit 0
+[ -n "$iface" ] || exit 0
+[ -r "$chap_file" ] || exit 0
+
+router_ip="$(awk -v u="$user" '
+  /^[[:space:]]*#/ { next }
+  NF >= 4 && $1 == u && $2 == "*" && $4 ~ /^10[.]100[.]/ { print $4; exit }
+' "$chap_file")"
+
+case "$router_ip" in
+  10.100.*)
+    ip route replace "${router_ip}/32" dev "$iface"
+    printf '%s up user=%s iface=%s route=%s/32\n' "$(date -Is)" "$user" "$iface" "$router_ip" >> "$log_file"
+    ;;
+esac
+EOF
+chmod 755 /etc/ppp/ip-up.d/fastnetpay-sstp-routes
+
+cat > /etc/ppp/ip-down.d/fastnetpay-sstp-routes <<'EOF'
+#!/bin/sh
+set -eu
+PATH=/usr/local/sbin:/usr/sbin:/sbin:/usr/local/bin:/usr/bin:/bin
+
+user="${PEERNAME:-}"
+chap_file="/etc/ppp/chap-secrets"
+log_file="/var/log/fastnetpay-sstp-routes.log"
+
+[ -n "$user" ] || exit 0
+[ -r "$chap_file" ] || exit 0
+
+router_ip="$(awk -v u="$user" '
+  /^[[:space:]]*#/ { next }
+  NF >= 4 && $1 == u && $2 == "*" && $4 ~ /^10[.]100[.]/ { print $4; exit }
+' "$chap_file")"
+
+case "$router_ip" in
+  10.100.*)
+    ip route del "${router_ip}/32" 2>/dev/null || true
+    printf '%s down user=%s route=%s/32\n' "$(date -Is)" "$user" "$router_ip" >> "$log_file"
+    ;;
+esac
+EOF
+chmod 755 /etc/ppp/ip-down.d/fastnetpay-sstp-routes
+
 cat > /etc/systemd/system/fastnetpay-sstp.service <<EOF
 [Unit]
 Description=FASTNETPAY SSTP VPN Server (accel-ppp)
@@ -113,6 +183,16 @@ cat > /etc/logrotate.d/fastnetpay-accel-ppp <<'EOF'
     endscript
 }
 EOF
+
+mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+cat > /etc/letsencrypt/renewal-hooks/deploy/fastnetpay-sstp.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if systemctl list-unit-files fastnetpay-sstp.service >/dev/null 2>&1; then
+  systemctl restart fastnetpay-sstp.service >/dev/null 2>&1 || true
+fi
+EOF
+chmod 755 /etc/letsencrypt/renewal-hooks/deploy/fastnetpay-sstp.sh
 
 cat > /etc/sysctl.d/99-fastnetpay-vpn.conf <<EOF
 net.ipv4.ip_forward=1

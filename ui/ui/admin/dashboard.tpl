@@ -160,7 +160,7 @@
     {/foreach}
 </div>
 
-{if $_c['new_version_notify'] != 'disable' && !($_tenant_mode eq 'tenant' && $_admin['user_type'] neq 'SuperAdmin')}
+{if $_app_stage != 'Live' && $_c['new_version_notify'] != 'disable' && !($_tenant_mode eq 'tenant' && $_admin['user_type'] neq 'SuperAdmin')}
     <script>
         window.addEventListener('DOMContentLoaded', function() {
             $.getJSON("./version.json?" + Math.random(), function(data) {

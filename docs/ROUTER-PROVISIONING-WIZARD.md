@@ -251,6 +251,7 @@ The wizard also restricts RouterOS API/API-SSL service access to the configured 
 - Router records include future-ready tenant/site/router-group fields without changing current single-tenant behavior.
 - Provisioning writes audit rows to `router_management_audit_logs`.
 - Preview output redacts sensitive passwords before sending scripts to the browser.
+- SSTP preview output now generates RB951/RouterOS v6-safe commands using `connect-to=sstp.fastnetpay.co.ke:4443`, imports the Let's Encrypt root CA, and avoids the unsupported `port=4443` one-liner form.
 
 Recommended beginner setup:
 
@@ -259,3 +260,25 @@ Recommended beginner setup:
 3. Use `fastnetpay-bridge` for Hotspot and PPPoE client traffic.
 4. Keep Local mode while testing in the same LAN.
 5. Move to WireGuard or SSTP when the router is managed from a VPS/cloud FASTNETPAY server.
+
+## SSTP RB951 Notes
+
+The tested RB951 runs RouterOS `6.49.19`, so WireGuard is unavailable. Use SSTP for remote management through the FASTNETPAY VPS.
+
+RouterOS v6 requirements:
+
+- Use `connect-to=sstp.fastnetpay.co.ke:4443`; do not use a separate `port=4443` argument.
+- Keep `add-default-route=no` so the VPN does not take over customer internet traffic.
+- The VPS SSTP server must use an RSA certificate for `sstp.fastnetpay.co.ke`; older RB951 clients can fail against the ECDSA wildcard web certificate.
+- The VPS `accel-ppp` SSTP config must not set `host-name=` because RouterOS v6 does not send SSTP client SNI.
+- Restrict RouterOS API to the VPN server IP only after `/interface sstp-client print` shows the tunnel running and `/ping 10.100.0.1` succeeds.
+- Import and trust `ISRG Root X1` on RouterOS before enabling `verify-server-certificate=yes`.
+- Pin a stable router management address such as `10.100.1.1/32` on `sstp-fastnetpay`; FASTNETPAY should register the router by this VPN IP, not `192.168.88.x`.
+
+Production RB951 validation completed:
+
+- RB951 SSTP interface `sstp-fastnetpay` was running.
+- Router had `10.100.1.1/32` on `sstp-fastnetpay`.
+- Router could ping FASTNETPAY/VPS `10.100.0.1`.
+- VPS could ping `10.100.1.1` and open RouterOS API `8728`.
+- FASTNETPAY PHP container could open TCP `10.100.1.1:8728`.

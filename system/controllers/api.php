@@ -87,6 +87,11 @@ switch ($action) {
         fnp_hotspot_payment_status();
         break;
 
+    case 'session':
+        $router = fnp_hotspot_authorize();
+        fnp_hotspot_session_status($router);
+        break;
+
     case 'voucher-login':
         $router = fnp_hotspot_authorize();
         fnp_hotspot_voucher_login($router);
@@ -303,6 +308,8 @@ function fnp_hotspot_start_mpesa($router)
 
 function fnp_hotspot_payment_status()
 {
+    global $PAYMENTGATEWAY_PATH;
+
     $paymentId = (int) _post('payment_id');
     $paymentToken = trim(_post('payment_token'));
     $payment = ORM::for_table('tbl_payment_gateway')->find_one($paymentId);
@@ -316,6 +323,10 @@ function fnp_hotspot_payment_status()
 
     $customer = ORM::for_table('tbl_customers')->find_one((int) $payment['user_id']);
     if ((int) $payment['status'] === 2) {
+        if ($payment['gateway'] === 'mpesastkpush') {
+            require_once $PAYMENTGATEWAY_PATH . DIRECTORY_SEPARATOR . 'mpesastkpush.php';
+            mpesastkpush_connect_hotspot_session($payment, $customer, _post('ip'), _post('mac'));
+        }
         fnp_hotspot_json([
             'ok' => true,
             'status' => 'paid',
@@ -334,9 +345,7 @@ function fnp_hotspot_payment_status()
 
 function fnp_hotspot_reconnect($router)
 {
-    if (!class_exists('JoviPay')) {
-        fnp_hotspot_json(['ok' => false, 'message' => 'Jovi-Pay reconnect service is not available.'], 503);
-    }
+    global $PAYMENTGATEWAY_PATH;
 
     $code = strtoupper(fnp_hotspot_clean(_post('transaction_code') ?: _post('mpesa_code') ?: _post('receipt'), 80));
     $phone = trim(_post('phone'));
@@ -346,11 +355,52 @@ function fnp_hotspot_reconnect($router)
         fnp_hotspot_json(['ok' => false, 'message' => 'Too many reconnect attempts. Please wait a few minutes and try again.'], 429);
     }
 
+    $joviError = null;
     try {
-        fnp_hotspot_json(JoviPay::reconnect($router, $code, $phone, $mac, $ip));
+        if (class_exists('JoviPay')) {
+            fnp_hotspot_json(JoviPay::reconnect($router, $code, $phone, $mac, $ip));
+        }
     } catch (Throwable $e) {
-        fnp_hotspot_json(['ok' => false, 'message' => $e->getMessage()], 422);
+        $joviError = $e->getMessage();
     }
+
+    require_once $PAYMENTGATEWAY_PATH . DIRECTORY_SEPARATOR . 'mpesastkpush.php';
+    try {
+        fnp_hotspot_json(mpesastkpush_reconnect_hotspot_payment($router, $code, $phone, $mac, $ip));
+    } catch (Throwable $e) {
+        fnp_hotspot_json(['ok' => false, 'message' => $joviError && stripos($joviError, 'not found') === false ? $joviError : $e->getMessage()], 422);
+    }
+}
+
+function fnp_hotspot_session_status($router)
+{
+    $mac = fnp_hotspot_clean(_post('mac'), 64);
+    $ip = fnp_hotspot_clean(_post('ip'), 64);
+    $customer = fnp_hotspot_find_customer_by_device($router, $mac, '', $ip);
+    if (!$customer) {
+        fnp_hotspot_json(['ok' => true, 'status' => 'none', 'message' => 'No active package found for this device.']);
+    }
+    fnp_hotspot_normalize_customer_identity($customer, $router, fnp_hotspot_username($router, $mac, $ip), $mac, $customer['phonenumber'] ?: '');
+    $customer->save();
+
+    $recharge = fnp_hotspot_latest_recharge($router, $customer);
+    if (!$recharge) {
+        fnp_hotspot_json(['ok' => true, 'status' => 'none', 'message' => 'No active package found for this device.']);
+    }
+
+    if (fnp_hotspot_recharge_expired($recharge)) {
+        fnp_hotspot_disconnect_expired($recharge);
+        fnp_hotspot_json(['ok' => true, 'status' => 'expired', 'message' => 'Your previous package has expired. Select a package to continue.']);
+    }
+
+    fnp_hotspot_connect_customer($router, $customer, $ip, $mac);
+    fnp_hotspot_json([
+        'ok' => true,
+        'status' => 'active',
+        'message' => 'Active package found. Connecting you now...',
+        'username' => $customer['username'],
+        'password' => $customer['password'],
+    ]);
 }
 
 function fnp_hotspot_voucher_login($router)
@@ -393,13 +443,10 @@ function fnp_hotspot_voucher_login($router)
 function fnp_hotspot_customer($router, $phone, $mac, $ip)
 {
     $tenantId = fnp_hotspot_tenant_id($router);
-    $seed = $router['id'] . '|' . $mac . '|' . $ip . '|' . $phone;
-    $username = 'hs_' . substr(sha1($seed), 0, 16);
-    $query = ORM::for_table('tbl_customers')->where('username', $username);
-    if (class_exists('Tenant') && Tenant::hasColumn('tbl_customers', 'tenant_id')) {
-        $query->where('tenant_id', $tenantId);
-    }
-    $customer = $query->find_one();
+    $macKey = fnp_hotspot_mac_key($mac);
+    $seed = $router['id'] . '|' . ($macKey ?: $mac) . '|' . $phone;
+    $username = fnp_hotspot_username($router, $mac, $ip);
+    $customer = fnp_hotspot_find_customer_by_device($router, $mac, $phone, $ip);
     if (!$customer) {
         $customer = ORM::for_table('tbl_customers')->create();
         if (class_exists('Tenant')) {
@@ -421,10 +468,181 @@ function fnp_hotspot_customer($router, $phone, $mac, $ip)
         $customer->status = 'Active';
         $customer->created_by = 0;
     }
+    fnp_hotspot_normalize_customer_identity($customer, $router, $username, $mac, $phone);
     $customer->phonenumber = $phone;
+    if ($macKey !== '') {
+        $customer->address = 'MikroTik hotspot ' . $router['name'] . ' device ' . $mac;
+    }
     $customer->last_login = date('Y-m-d H:i:s');
     $customer->save();
     return $customer;
+}
+
+function fnp_hotspot_mac_key($mac)
+{
+    $mac = strtoupper(preg_replace('/[^A-F0-9]/i', '', (string) $mac));
+    return strlen($mac) >= 10 ? substr($mac, -12) : '';
+}
+
+function fnp_hotspot_username($router, $mac, $ip = '')
+{
+    $macKey = fnp_hotspot_mac_key($mac);
+    if ($macKey !== '') {
+        return $macKey;
+    }
+    return 'HS' . strtoupper(substr(sha1((int) $router['id'] . '|' . $ip), 0, 14));
+}
+
+function fnp_hotspot_mac_display($mac)
+{
+    $macKey = fnp_hotspot_mac_key($mac);
+    if ($macKey === '') {
+        return fnp_hotspot_clean($mac, 64);
+    }
+    return implode(':', str_split($macKey, 2));
+}
+
+function fnp_hotspot_find_customer_by_device($router, $mac, $phone = '', $ip = '')
+{
+    $tenantId = fnp_hotspot_tenant_id($router);
+    $username = fnp_hotspot_username($router, $mac, $ip);
+    $macKey = fnp_hotspot_mac_key($mac);
+    $formattedMac = fnp_hotspot_mac_display($mac);
+    $oldUsername = $macKey !== '' ? 'hs_r' . (int) $router['id'] . '_' . strtolower(substr($macKey, -12)) : '';
+
+    $candidates = array_values(array_unique(array_filter([$username, $oldUsername])));
+    if ($candidates) {
+        $query = ORM::for_table('tbl_customers')->where_in('username', $candidates);
+        if (class_exists('Tenant') && Tenant::hasColumn('tbl_customers', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+        $customer = $query->order_by_desc('id')->find_one();
+        if ($customer) {
+            return $customer;
+        }
+    }
+
+    if ($macKey !== '') {
+        $query = ORM::for_table('tbl_customers')
+            ->where_raw('(fullname LIKE ? OR address LIKE ?)', [$formattedMac . '-%', '%device ' . $formattedMac . '%'])
+            ->order_by_desc('id');
+        if (class_exists('Tenant') && Tenant::hasColumn('tbl_customers', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+        $customer = $query->find_one();
+        if ($customer) {
+            return $customer;
+        }
+
+        $payment = ORM::for_table('tbl_payment_gateway')
+            ->where_raw('(pg_request LIKE ? OR pg_request LIKE ?)', ['%"mac":"' . $formattedMac . '"%', '%"mac":"' . $macKey . '"%'])
+            ->where_gt('user_id', 0)
+            ->order_by_desc('id')
+            ->find_one();
+        if ($payment) {
+            $customer = ORM::for_table('tbl_customers')->find_one((int) $payment['user_id']);
+            if ($customer) {
+                return $customer;
+            }
+        }
+    }
+
+    return null;
+}
+
+function fnp_hotspot_normalize_customer_identity($customer, $router, $username, $mac, $phone)
+{
+    $tenantId = fnp_hotspot_tenant_id($router);
+    $formattedMac = fnp_hotspot_mac_display($mac);
+    $fullname = ($formattedMac !== '' ? $formattedMac : $username) . '-' . ($phone ?: 'unknown');
+
+    if ($username !== '' && $customer['username'] !== $username) {
+        $query = ORM::for_table('tbl_customers')->where('username', $username);
+        if (class_exists('Tenant') && Tenant::hasColumn('tbl_customers', 'tenant_id')) {
+            $query->where('tenant_id', $tenantId);
+        }
+        $existing = $query->find_one();
+        if (!$existing || (int) $existing['id'] === (int) $customer['id']) {
+            $oldUsername = (string) $customer['username'];
+            $customer->username = $username;
+            fnp_hotspot_update_username_references($customer, $oldUsername, $username);
+        }
+    }
+
+    $customer->fullname = substr($fullname, 0, 190);
+    $customer->email = strtolower(preg_replace('/[^A-Za-z0-9_.-]/', '', $username)) . '@hotspot.local';
+}
+
+function fnp_hotspot_update_username_references($customer, $oldUsername, $newUsername)
+{
+    if ($oldUsername === '' || $oldUsername === $newUsername) {
+        return;
+    }
+    foreach ([
+        'tbl_user_recharges' => 'customer_id',
+        'tbl_payment_gateway' => 'user_id',
+        'tbl_transactions' => 'user_id',
+        'jovipay_transactions' => 'customer_id',
+    ] as $table => $idColumn) {
+        try {
+            if (class_exists('Tenant') && !Tenant::hasColumn($table, 'username')) {
+                continue;
+            }
+            $rows = ORM::for_table($table)->where($idColumn, (int) $customer['id'])->find_many();
+            foreach ($rows as $row) {
+                $row->username = $newUsername;
+                $row->save();
+            }
+        } catch (Throwable $ignored) {
+        }
+    }
+}
+
+function fnp_hotspot_latest_recharge($router, $customer)
+{
+    return ORM::for_table('tbl_user_recharges')
+        ->where('customer_id', (int) $customer['id'])
+        ->where('routers', $router['name'])
+        ->where('type', 'Hotspot')
+        ->where('status', 'on')
+        ->order_by_desc('id')
+        ->find_one();
+}
+
+function fnp_hotspot_recharge_expired($recharge)
+{
+    return strtotime($recharge['expiration'] . ' ' . $recharge['time']) <= time();
+}
+
+function fnp_hotspot_disconnect_expired($recharge)
+{
+    try {
+        ExpiryWorker::disconnectRecharge(0, $recharge);
+    } catch (Throwable $e) {
+        _log('FASTNETPAY hotspot portal expiry disconnect failed for ' . $recharge['username'] . ': ' . $e->getMessage(), 'Cron', 0);
+    }
+}
+
+function fnp_hotspot_connect_customer($router, $customer, $ip, $mac)
+{
+    global $DEVICE_PATH;
+    $ip = fnp_hotspot_clean($ip, 64);
+    $mac = fnp_hotspot_clean($mac, 64);
+    if ($ip === '' || $mac === '') {
+        return false;
+    }
+    try {
+        $devicePath = $DEVICE_PATH . DIRECTORY_SEPARATOR . 'MikrotikHotspot.php';
+        if (!file_exists($devicePath)) {
+            return false;
+        }
+        require_once $devicePath;
+        (new MikrotikHotspot())->connect_customer($customer, $ip, $mac, $router['name']);
+        return true;
+    } catch (Throwable $e) {
+        _log('FASTNETPAY hotspot auto-session login pending for ' . $customer['username'] . ': ' . $e->getMessage(), 'Payment Gateway', 0);
+        return false;
+    }
 }
 
 function fnp_hotspot_clean($value, $max = 64)

@@ -2,6 +2,8 @@
 
 class SecurityThrottle
 {
+    const SCHEMA_VERSION = '2026-07-17-throttle1';
+
     const DEFAULTS = [
         'security_throttle_enabled' => 'yes',
         'security_throttle_window_seconds' => '60',
@@ -99,6 +101,10 @@ class SecurityThrottle
 
     public static function ensureSchema()
     {
+        if (class_exists('FastnetpayRuntime') && FastnetpayRuntime::schemaFresh('security_throttle', self::SCHEMA_VERSION, 86400)) {
+            return;
+        }
+
         ORM::raw_execute("CREATE TABLE IF NOT EXISTS security_rate_counters (
             rate_key CHAR(64) NOT NULL PRIMARY KEY,
             ip VARCHAR(45) NOT NULL,
@@ -143,6 +149,10 @@ class SecurityThrottle
             INDEX idx_action_enabled (action, enabled),
             INDEX idx_rule_type (rule_type)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        if (class_exists('FastnetpayRuntime')) {
+            FastnetpayRuntime::markSchemaFresh('security_throttle', self::SCHEMA_VERSION);
+        }
     }
 
     public static function config($config)
@@ -303,8 +313,14 @@ class SecurityThrottle
 
     private static function matchesRule($action, $ip, $ua, $route)
     {
-        $query = ORM::for_table('security_throttle_rules')->where('enabled', 1)->where('action', $action);
-        $rules = $query->find_array();
+        static $rulesByAction = [];
+        if (!isset($rulesByAction[$action])) {
+            $rulesByAction[$action] = ORM::for_table('security_throttle_rules')
+                ->where('enabled', 1)
+                ->where('action', $action)
+                ->find_array();
+        }
+        $rules = $rulesByAction[$action];
         $now = time();
         foreach ($rules as $rule) {
             if (!empty($rule['expires_at']) && strtotime($rule['expires_at']) < $now) {

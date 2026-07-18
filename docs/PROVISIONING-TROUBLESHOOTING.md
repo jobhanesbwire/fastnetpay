@@ -2,6 +2,27 @@
 
 ## Wizard Connects Then Aborts
 
+If the browser reports:
+
+```text
+Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+```
+
+the wizard expected a JSON response but received an HTML page. Common causes are an expired admin session, a production proxy error, a FASTNETPAY crash page, or a RouterOS API command timing out before PHP can return JSON.
+
+For production SSTP routers, check whether the router is already registered by VPN IP, for example `10.100.1.1`. Do not recreate or rotate the `sstp-fastnetpay` client while FASTNETPAY is currently connected through that same tunnel. The wizard now guards this case and skips SSTP client recreation when the active API host equals the configured router VPN IP.
+
+Inspect the last provisioning steps:
+
+```sql
+SELECT id, step_name, status, error_message
+FROM router_provisioning_steps
+ORDER BY id DESC
+LIMIT 20;
+```
+
+If the last running step is in `VPN Remote Management`, reconnect locally through the management port, confirm SSTP is already up, or rerun the wizard after the stale run has been marked failed.
+
 If FASTNETPAY reports:
 
 ```text

@@ -121,6 +121,9 @@ class RouterProvisioning
         self::ensureColumn('router_port_mappings', 'management_allowed_mac', 'VARCHAR(32) NULL');
         self::ensureColumn('router_port_mappings', 'connection_mode', "VARCHAR(32) NOT NULL DEFAULT 'local'");
         self::ensureColumn('router_port_mappings', 'vpn_ip', 'VARCHAR(45) NULL');
+        self::ensureColumn('router_port_mappings', 'sstp_server', 'VARCHAR(190) NULL');
+        self::ensureColumn('router_port_mappings', 'sstp_username', 'VARCHAR(120) NULL');
+        self::ensureColumn('router_port_mappings', 'sstp_password', 'VARCHAR(190) NULL');
 
         self::seedTemplates();
         self::seedSamplePackages();
@@ -404,7 +407,7 @@ class RouterProvisioning
             'wireguard_endpoint' => 'vpn.fastnetpay.co.ke',
             'wireguard_public_key' => '',
             'wireguard_private_key' => '',
-            'sstp_server' => '',
+            'sstp_server' => 'sstp.fastnetpay.co.ke:4443',
             'sstp_username' => '',
             'sstp_password' => '',
             'secure_management_url' => '',
@@ -445,7 +448,7 @@ class RouterProvisioning
                         $defaults[$field] = $mapping[$field];
                     }
                 }
-                foreach (['management_ip', 'management_allowed_mac', 'connection_mode', 'vpn_ip'] as $field) {
+                foreach (['management_ip', 'management_allowed_mac', 'connection_mode', 'vpn_ip', 'sstp_server', 'sstp_username', 'sstp_password'] as $field) {
                     if (!empty($mapping[$field])) {
                         if ($field === 'vpn_ip') {
                             $defaults['vpn_router_ip'] = $mapping[$field];
@@ -488,6 +491,10 @@ class RouterProvisioning
         $clean['api_restrict_mode'] = self::choice($clean['api_restrict_mode'], ['local', 'vpn'], $clean['connection_mode'] === 'local' ? 'local' : 'vpn');
         $clean['vpn_server_ip'] = self::ip($clean['vpn_server_ip'], '10.100.0.1');
         $clean['vpn_router_ip'] = self::ip($clean['vpn_router_ip'], '10.100.1.1');
+        if ($clean['connection_mode'] !== 'local') {
+            $clean['fastnetpay_server_ip'] = $clean['vpn_server_ip'];
+            $clean = self::applyVpnHotspotClientDefaults($clean);
+        }
         $clean['vpn_port'] = (string) self::port($clean['vpn_port'], 51820);
         $clean['wireguard_endpoint'] = self::cleanText($clean['wireguard_endpoint'] ?? 'vpn.fastnetpay.co.ke', 190);
         $clean['secure_management_url'] = self::cleanUrl($clean['secure_management_url']);
@@ -516,6 +523,25 @@ class RouterProvisioning
             if (trim((string) ($settings['dhcp_range'] ?? '')) === '' || strpos((string) $settings['dhcp_range'], '192.168.88.') !== false) {
                 $settings['dhcp_range'] = '192.168.90.50-192.168.90.250';
             }
+        }
+
+        return $settings;
+    }
+
+    private static function applyVpnHotspotClientDefaults($settings)
+    {
+        $gateway = trim((string) ($settings['lan_gateway'] ?? ''));
+        $hotspotPool = trim((string) ($settings['hotspot_pool'] ?? ''));
+        $dhcpRange = trim((string) ($settings['dhcp_range'] ?? ''));
+
+        if ($gateway === '' || $gateway === '192.168.90.1/24' || strpos($gateway, '192.168.88.') === 0) {
+            $settings['lan_gateway'] = '10.100.90.1/24';
+        }
+        if ($hotspotPool === '' || $hotspotPool === '192.168.90.50-192.168.90.250' || strpos($hotspotPool, '192.168.88.') !== false) {
+            $settings['hotspot_pool'] = '10.100.90.50-10.100.90.250';
+        }
+        if ($dhcpRange === '' || $dhcpRange === '192.168.90.50-192.168.90.250' || strpos($dhcpRange, '192.168.88.') !== false) {
+            $settings['dhcp_range'] = '10.100.90.50-10.100.90.250';
         }
 
         return $settings;
@@ -784,7 +810,144 @@ class RouterProvisioning
             ];
         }
 
-    public static function runProvisioning($router, $settings, $admin)
+    public static function queueProvisioning($router, $settings, $admin)
+    {
+        self::installSchema();
+        if (!$router) {
+            throw new Exception('Save the router first, then run automatic provisioning from the router list or edit page.');
+        }
+
+        self::savePortMapping((int) $router['id'], $settings);
+        self::saveRouterProvisioningSettings($router, $settings);
+        self::markStaleProvisioningRuns((int) $router['id']);
+        $preview = self::buildProvisioningScript($router, $settings, self::plans(), self::mpesaReadiness(), true);
+
+        $run = ORM::for_table('router_provisioning_runs')->create();
+        if (class_exists('Tenant')) {
+            Tenant::stamp($run, Tenant::rowTenantId($router), 'router_provisioning_runs');
+        }
+        $run->router_id = (int) $router['id'];
+        $run->deployment_profile = $settings['deployment_profile'];
+        $run->routeros_version = 'queued';
+        $run->status = 'queued';
+        $run->started_at = date('Y-m-d H:i:s');
+        $run->created_by = (int) ($admin['id'] ?? 0);
+        $run->notes = json_encode([
+            'warnings' => $preview['warnings'],
+            'settings' => $settings,
+            'async' => true,
+        ]);
+        $run->save();
+        $runId = (int) $run->id();
+
+        self::logStep($runId, 'Provisioning Queued', 'success', 'Provisioning was queued for background execution to avoid Cloudflare/proxy request timeouts.', '');
+        self::auditRouterAction((int) $router['id'], (int) ($admin['id'] ?? 0), 'provisioning-queued', 'Run #' . $runId . ' queued for background execution.');
+        self::spawnProvisioningWorker($runId);
+
+        return [
+            'ok' => true,
+            'async' => true,
+            'run_id' => $runId,
+            'status' => 'queued',
+            'backup_file' => '',
+            'steps' => [[
+                'name' => 'Provisioning Queued',
+                'status' => 'running',
+                'message' => 'FASTNETPAY is applying this in the background. Keep this page open; progress will update automatically.',
+            ]],
+            'warnings' => $preview['warnings'],
+        ];
+    }
+
+    public static function runQueuedProvisioning($runId)
+    {
+        self::installSchema();
+        $run = ORM::for_table('router_provisioning_runs')->find_one((int) $runId);
+        if (!$run) {
+            throw new Exception('Provisioning run not found.');
+        }
+        if (!in_array((string) $run['status'], ['queued', 'running'], true)) {
+            return;
+        }
+
+        $notes = json_decode((string) $run['notes'], true);
+        $settings = is_array($notes['settings'] ?? null) ? $notes['settings'] : [];
+        $router = self::router((int) $run['router_id']);
+        if (!$router) {
+            $run->status = 'failed';
+            $run->completed_at = date('Y-m-d H:i:s');
+            $run->save();
+            self::logStep((int) $runId, 'Provisioning Worker', 'failed', '', 'Router no longer exists.');
+            return;
+        }
+        if (!$settings) {
+            $settings = self::settingsFromRequest($router);
+        }
+
+        self::runProvisioning($router, $settings, ['id' => (int) $run['created_by']], (int) $runId);
+    }
+
+    public static function provisioningStatus($routerId = 0, $runId = 0)
+    {
+        self::installSchema();
+        $query = ORM::for_table('router_provisioning_runs')->order_by_desc('id');
+        if (class_exists('Tenant')) {
+            $query = Tenant::scopeIfTenant($query);
+        }
+        if ((int) $runId > 0) {
+            $query->where('id', (int) $runId);
+        } elseif ((int) $routerId > 0) {
+            $query->where('router_id', (int) $routerId);
+        }
+        $run = $query->find_one();
+        if (!$run) {
+            return ['ok' => true, 'status' => 'none', 'run_id' => 0, 'steps' => []];
+        }
+
+        $steps = [];
+        $final = null;
+        foreach (self::steps((int) $run['id']) as $step) {
+            $message = (string) ($step['error_message'] ?: $step['output']);
+            if ($step['step_name'] === 'Final Test' && $step['output']) {
+                $decoded = json_decode((string) $step['output'], true);
+                if (is_array($decoded)) {
+                    $final = $decoded;
+                }
+            }
+            $steps[] = [
+                'name' => (string) $step['step_name'],
+                'status' => (string) $step['status'],
+                'message' => self::redact(substr(strip_tags($message), 0, 500)),
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'async' => in_array((string) $run['status'], ['queued', 'running'], true),
+            'run_id' => (int) $run['id'],
+            'status' => (string) $run['status'],
+            'backup_file' => (string) $run['backup_file'],
+            'steps' => $steps,
+            'final_result' => $final,
+        ];
+    }
+
+    private static function spawnProvisioningWorker($runId)
+    {
+        $worker = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'cli' . DIRECTORY_SEPARATOR . 'router_provision_worker.php';
+        if (!is_file($worker)) {
+            throw new Exception('Provisioning worker script is missing.');
+        }
+        if (!function_exists('exec')) {
+            throw new Exception('PHP exec() is disabled, so FASTNETPAY cannot start the background provisioning worker.');
+        }
+
+        $php = defined('PHP_BINARY') && PHP_BINARY ? PHP_BINARY : 'php';
+        $cmd = escapeshellarg($php) . ' ' . escapeshellarg($worker) . ' ' . (int) $runId . ' > /dev/null 2>&1 &';
+        exec($cmd);
+    }
+
+    public static function runProvisioning($router, $settings, $admin, $existingRunId = 0)
     {
         self::installSchema();
         if (!$router) {
@@ -793,6 +956,9 @@ class RouterProvisioning
 
             self::savePortMapping((int) $router['id'], $settings);
             self::saveRouterProvisioningSettings($router, $settings);
+            if ((int) $existingRunId <= 0) {
+                self::markStaleProvisioningRuns((int) $router['id']);
+            }
             self::auditRouterAction((int) $router['id'], (int) ($admin['id'] ?? 0), 'provisioning-started', 'Deployment ' . $settings['deployment_profile'] . ', connection mode ' . $settings['connection_mode']);
             $preview = self::buildProvisioningScript($router, $settings, self::plans(), self::mpesaReadiness());
         $detect = ['version' => 'unknown'];
@@ -802,15 +968,20 @@ class RouterProvisioning
             $detect['version'] = 'unknown';
         }
 
-        $run = ORM::for_table('router_provisioning_runs')->create();
-        if (class_exists('Tenant')) {
-            Tenant::stamp($run, Tenant::rowTenantId($router), 'router_provisioning_runs');
+        $run = (int) $existingRunId > 0 ? ORM::for_table('router_provisioning_runs')->find_one((int) $existingRunId) : null;
+        if (!$run) {
+            $run = ORM::for_table('router_provisioning_runs')->create();
+            if (class_exists('Tenant')) {
+                Tenant::stamp($run, Tenant::rowTenantId($router), 'router_provisioning_runs');
+            }
         }
         $run->router_id = (int) $router['id'];
         $run->deployment_profile = $settings['deployment_profile'];
         $run->routeros_version = $detect['version'] ?? '';
         $run->status = 'running';
-        $run->started_at = date('Y-m-d H:i:s');
+        if (!$run['started_at'] || $run['status'] === 'queued') {
+            $run->started_at = date('Y-m-d H:i:s');
+        }
         $run->created_by = (int) ($admin['id'] ?? 0);
         $run->notes = json_encode(['warnings' => $preview['warnings']]);
         $run->save();
@@ -890,7 +1061,7 @@ class RouterProvisioning
             $name = $section['name'];
             try {
                 self::logStep($runId, $name, 'running', 'Applying ' . count($section['commands']) . ' command lines.', '');
-                self::applySection($client, $runId, $index + 1, $section);
+                self::applySection($client, $runId, $index + 1, $section, $settings);
                 self::logStep($runId, $name, 'success', implode("\n", $section['commands']), '');
                 $resultSteps[] = ['name' => $name, 'status' => 'success', 'message' => 'Applied successfully.'];
             } catch (Throwable $e) {
@@ -904,7 +1075,7 @@ class RouterProvisioning
         if (!$failed) {
             try {
                 self::logStep($runId, 'RouterOS Direct Reconciliation', 'running', 'Verifying critical Hotspot, DHCP, PPPoE, bridge, and wireless objects through direct API calls.', '');
-                $repairMessages = self::reconcileCriticalProvisioningState($client, $settings, $preview['selected_plans'], $router);
+                $repairMessages = self::reconcileCriticalProvisioningState($client, $settings, $preview['selected_plans'], $router, $runId);
                 self::logStep($runId, 'RouterOS Direct Reconciliation', 'success', implode("\n", $repairMessages), '');
                 $resultSteps[] = ['name' => 'RouterOS Direct Reconciliation', 'status' => 'success', 'message' => 'Critical RouterOS objects were verified or repaired through direct API calls.'];
             } catch (Throwable $e) {
@@ -1003,7 +1174,15 @@ class RouterProvisioning
             $items[] = self::finalItem('api_restriction', 'RouterOS API restriction', $apiService ? 'success' : 'warning', $apiService ? self::prop($apiService, 'address', '0.0.0.0/0') : 'unknown', 'Production should restrict API to FASTNETPAY local/VPN IP only.');
             if ($connectionMode !== 'local') {
                 $vpnInterface = $connectionMode === 'wireguard' ? 'fastnetpay-wg' : 'fastnetpay-sstp';
-                $items[] = self::finalItem('vpn', strtoupper($connectionMode) . ' management tunnel', self::findRowBy($interfaces, 'name', $vpnInterface) ? 'success' : 'warning', $vpnInterface, 'Remote production routers should be managed through VPN, not public API.');
+                $vpnRow = self::findRowBy($interfaces, 'name', $vpnInterface);
+                $routerVpnIp = self::ip($settings['vpn_router_ip'] ?? '', '10.100.1.1');
+                $hasVpnAddress = self::hasAddress($addresses, $routerVpnIp . '/32', $vpnInterface);
+                $vpnRunning = $connectionMode === 'sstp' ? (self::prop($vpnRow, 'running', 'false') === 'true') : (bool) $vpnRow;
+                $vpnStatus = ($vpnRow && $vpnRunning && $hasVpnAddress) ? 'success' : 'warning';
+                $vpnMessage = $vpnStatus === 'success'
+                    ? strtoupper($connectionMode) . ' is up and the router has stable VPN API IP ' . $routerVpnIp . '.'
+                    : 'Remote production routers should be managed through VPN. Confirm the tunnel is running and ' . $routerVpnIp . '/32 exists on ' . $vpnInterface . '.';
+                $items[] = self::finalItem('vpn', strtoupper($connectionMode) . ' management tunnel', $vpnStatus, $routerVpnIp, $vpnMessage);
             }
 
             if ($bridge) {
@@ -1265,6 +1444,100 @@ class RouterProvisioning
             '# RouterOS user: ' . self::API_USERNAME . ' with the password entered in the wizard.',
             '# API services are enabled in PHPNuxBill-compatible mode first; strict IP restrictions are applied only in the Security step after preview.',
             '# Planned FASTNETPAY server IP for strict security mode: ' . $serverIp,
+        ];
+    }
+
+    public static function buildResetRouterBootstrapScript($router, $settings, $redactSensitive = false)
+    {
+        self::installSchema();
+
+        $apiPassword = (string) ($settings['api_password'] ?? '');
+        if ($apiPassword === '' && $router && (string) ($router['username'] ?? '') === self::API_USERNAME) {
+            $apiPassword = (string) ($router['password'] ?? '');
+        }
+
+        $serverIp = self::ip($settings['vpn_server_ip'] ?? '', '10.100.0.1');
+        $routerIp = self::ip($settings['vpn_router_ip'] ?? '', '10.100.1.1');
+        $wanInterface = self::rosName($settings['wan_interface'] ?? 'ether1');
+        $sstpServer = self::sstpConnectTo($settings['sstp_server'] ?? '', 4443);
+        $sstpHost = preg_replace('/:.*/', '', $sstpServer);
+        $sstpUser = self::cleanText($settings['sstp_username'] ?? '', 120);
+        $sstpPassword = (string) ($settings['sstp_password'] ?? '');
+        $apiPort = self::port($settings['api_port'] ?? 8728, 8728);
+        $apiSslPort = self::port($settings['api_ssl_port'] ?? 8729, 8729);
+
+        $missing = [];
+        if ($apiPassword === '') {
+            $missing[] = 'FASTNETPAY API password';
+        }
+        if ($sstpServer === '') {
+            $missing[] = 'SSTP server';
+        }
+        if ($sstpUser === '') {
+            $missing[] = 'SSTP username';
+        }
+        if ($sstpPassword === '') {
+            $missing[] = 'SSTP password';
+        }
+
+        $commands = [
+            '# FASTNETPAY reset-router bootstrap.',
+            '# Paste this once into Winbox Terminal after resetting a MikroTik that production cannot reach yet.',
+            '# It only brings the router online for FASTNETPAY: enables API, creates fastnet-api-usr, and dials the SSTP tunnel.',
+            '# After this finishes, test the router in FASTNETPAY using ' . $routerIp . ':8728, then run full provisioning.',
+            '/ip service set api disabled=no port=' . (int) $apiPort . ' address=0.0.0.0/0',
+            ':do {/ip service set api-ssl disabled=no port=' . (int) $apiSslPort . ' address=0.0.0.0/0} on-error={:log warning ' . self::q('FASTNETPAY API-SSL service could not be enabled during bootstrap') . '}',
+            ':if ([:len [/user group find name=' . self::q(self::API_GROUP) . ']] = 0) do={/user group add name=' . self::q(self::API_GROUP) . ' policy=read,write,policy,test,api,sensitive comment=' . self::q('FASTNETPAY API-only automation group') . '} else={/user group set [find name=' . self::q(self::API_GROUP) . '] policy=read,write,policy,test,api,sensitive comment=' . self::q('FASTNETPAY API-only automation group') . '}',
+            '# Bootstrap WAN reachability. Plug internet/uplink into ' . $wanInterface . ' before running this on a reset router.',
+            ':do {:if ([:len [/interface list find name=' . self::q('WAN') . ']] = 0) do={/interface list add name=' . self::q('WAN') . ' comment=' . self::q('FASTNETPAY WAN interfaces') . '}} on-error={:log info ' . self::q('FASTNETPAY WAN list already exists or cannot be created') . '}',
+            ':do {:if ([:len [/interface list member find list=' . self::q('WAN') . ' interface=' . self::q($wanInterface) . ']] = 0) do={/interface list member add list=' . self::q('WAN') . ' interface=' . self::q($wanInterface) . ' comment=' . self::q('FASTNETPAY bootstrap WAN') . '}} on-error={:log warning ' . self::q('FASTNETPAY WAN interface not found; check ether1/uplink') . '}',
+            ':do {:if ([:len [/ip dhcp-client find comment=' . self::q('FASTNETPAY bootstrap WAN DHCP') . ']] = 0) do={/ip dhcp-client add interface=' . self::q($wanInterface) . ' add-default-route=yes use-peer-dns=yes disabled=no comment=' . self::q('FASTNETPAY bootstrap WAN DHCP') . '} else={/ip dhcp-client set [find comment=' . self::q('FASTNETPAY bootstrap WAN DHCP') . '] interface=' . self::q($wanInterface) . ' add-default-route=yes use-peer-dns=yes disabled=no}} on-error={:log warning ' . self::q('FASTNETPAY could not start WAN DHCP; configure internet on ether1 first') . '}',
+            '/ip dns set servers=' . self::q('1.1.1.1,8.8.8.8') . ' allow-remote-requests=yes',
+            ':delay 8s',
+        ];
+
+        if ($apiPassword !== '') {
+            $commands[] = ':if ([:len [/user find name=' . self::q(self::API_USERNAME) . ']] = 0) do={/user add name=' . self::q(self::API_USERNAME) . ' password=' . self::q($apiPassword) . ' group=' . self::q(self::API_GROUP) . ' disabled=no comment=' . self::q('FASTNETPAY API automation user') . '} else={/user set [find name=' . self::q(self::API_USERNAME) . '] password=' . self::q($apiPassword) . ' group=' . self::q(self::API_GROUP) . ' disabled=no comment=' . self::q('FASTNETPAY API automation user') . '}';
+        } else {
+            $commands[] = '# Missing FASTNETPAY API password. Enter it in the wizard before using this bootstrap.';
+        }
+
+        if ($sstpServer !== '' && $sstpUser !== '' && $sstpPassword !== '') {
+            $commands[] = '# RouterOS v6 reset bootstrap avoids /tool fetch CA download because it can hang before the tunnel exists.';
+            $commands[] = '# The SSTP account password still authenticates the router; enable certificate verification later from local management if needed.';
+            $commands[] = ':do {/resolve ' . self::q($sstpHost) . '} on-error={:log warning ' . self::q('FASTNETPAY could not resolve SSTP host; confirm WAN internet/DNS on ether1') . '}';
+            $commands[] = ':if ([:len [/interface sstp-client find name=' . self::q('sstp-fastnetpay') . ']] = 0) do={/interface sstp-client add name=' . self::q('sstp-fastnetpay') . ' connect-to=' . self::q($sstpServer) . ' user=' . self::q($sstpUser) . ' password=' . self::q($sstpPassword) . ' profile=' . self::q('default-encryption') . ' verify-server-certificate=no add-default-route=no disabled=yes comment=' . self::q('FASTNETPAY SSTP management tunnel') . '}';
+            $commands[] = '/interface sstp-client set [find name=' . self::q('sstp-fastnetpay') . '] connect-to=' . self::q($sstpServer);
+            $commands[] = '/interface sstp-client set [find name=' . self::q('sstp-fastnetpay') . '] user=' . self::q($sstpUser);
+            $commands[] = '/interface sstp-client set [find name=' . self::q('sstp-fastnetpay') . '] password=' . self::q($sstpPassword);
+            $commands[] = '/interface sstp-client set [find name=' . self::q('sstp-fastnetpay') . '] profile=' . self::q('default-encryption') . ' verify-server-certificate=no';
+            $commands[] = '/interface sstp-client set [find name=' . self::q('sstp-fastnetpay') . '] add-default-route=no disabled=no comment=' . self::q('FASTNETPAY SSTP management tunnel');
+            $commands[] = ':delay 5s';
+            $commands[] = ':if ([:len [/ip address find comment=' . self::q('FASTNETPAY stable router VPN API IP') . ']] = 0) do={/ip address add address=' . self::q($routerIp . '/32') . ' network=' . self::q($serverIp) . ' interface=' . self::q('sstp-fastnetpay') . ' comment=' . self::q('FASTNETPAY stable router VPN API IP') . '} else={/ip address set [find comment=' . self::q('FASTNETPAY stable router VPN API IP') . '] address=' . self::q($routerIp . '/32') . ' network=' . self::q($serverIp) . ' interface=' . self::q('sstp-fastnetpay') . '}';
+            $commands[] = ':if ([:len [/ip firewall filter find comment=' . self::q('FASTNETPAY accept VPN management input') . ']] = 0) do={:do {/ip firewall filter add chain=input src-address=' . self::q($serverIp) . ' action=accept place-before=0 comment=' . self::q('FASTNETPAY accept VPN management input') . '} on-error={/ip firewall filter add chain=input src-address=' . self::q($serverIp) . ' action=accept comment=' . self::q('FASTNETPAY accept VPN management input') . '}}';
+            $commands[] = ':do {:if ([:len [/interface list find name=' . self::q('LAN') . ']] = 0) do={/interface list add name=' . self::q('LAN') . ' comment=' . self::q('FASTNETPAY LAN interfaces') . '}} on-error={:log info ' . self::q('FASTNETPAY LAN list already exists or cannot be created') . '}';
+            $commands[] = self::onceByFind('/interface list member find list=' . self::q('LAN') . ' interface=' . self::q('sstp-fastnetpay'), '/interface list member add list=' . self::q('LAN') . ' interface=' . self::q('sstp-fastnetpay') . ' comment=' . self::q('FASTNETPAY VPN management tunnel'));
+            $commands[] = ':delay 10s';
+            $commands[] = '/interface sstp-client print detail where name=' . self::q('sstp-fastnetpay');
+            $commands[] = '/ip address print where interface=' . self::q('sstp-fastnetpay');
+            $commands[] = '/ping ' . $serverIp . ' count=3';
+        } else {
+            $commands[] = '# Missing SSTP settings: enter SSTP server, username, and password before using this bootstrap.';
+        }
+
+        $script = trim(implode("\n", $commands)) . "\n";
+        if ($redactSensitive) {
+            $script = self::redact($script);
+        }
+
+        return [
+            'ok' => empty($missing),
+            'message' => empty($missing)
+                ? 'Bootstrap script ready. Paste it into the reset MikroTik Terminal, wait for SSTP to connect, then run full provisioning from FASTNETPAY.'
+                : 'Bootstrap script needs: ' . implode(', ', $missing) . '.',
+            'script' => $script,
+            'missing' => $missing,
+            'router_vpn_ip' => $routerIp,
         ];
     }
 
@@ -1545,9 +1818,7 @@ class RouterProvisioning
             $commands[] = self::onceByFind('/interface bridge port find interface=' . self::q($interface), '/interface bridge port add bridge=' . self::q($bridge) . ' interface=' . self::q($interface) . ' comment=' . self::q('FASTNETPAY selected bridge port'));
         }
 
-        $commands[] = ':do {:foreach i in=[/interface ethernet find] do={:local n [/interface ethernet get $i name]; :if (($n != ' . self::q($wan) . ') and ($n != ' . self::q($bridge) . ') and ($n != ' . self::q($management) . ')) do={:if ([:len [/interface bridge port find interface=$n]] > 0) do={/interface bridge port set [find interface=$n] bridge=' . self::q($bridge) . ' comment=' . self::q('FASTNETPAY auto LAN bridge port') . '} else={/interface bridge port add bridge=' . self::q($bridge) . ' interface=$n comment=' . self::q('FASTNETPAY auto LAN bridge port') . '}}}} on-error={:log warning ' . self::q('FASTNETPAY could not auto-add ethernet ports to bridge') . '}';
-        $commands[] = ':do {:foreach i in=[/interface wireless find] do={:local n [/interface wireless get $i name]; :if ([:len [/interface bridge port find interface=$n]] > 0) do={/interface bridge port set [find interface=$n] bridge=' . self::q($bridge) . ' comment=' . self::q('FASTNETPAY wireless hotspot bridge port') . '} else={/interface bridge port add bridge=' . self::q($bridge) . ' interface=$n comment=' . self::q('FASTNETPAY wireless hotspot bridge port') . '}}} on-error={:log warning ' . self::q('FASTNETPAY no legacy wireless bridge ports added') . '}';
-        $commands[] = ':do {:foreach i in=[/interface wifi find] do={:local n [/interface wifi get $i name]; :if ([:len [/interface bridge port find interface=$n]] > 0) do={/interface bridge port set [find interface=$n] bridge=' . self::q($bridge) . ' comment=' . self::q('FASTNETPAY WiFi hotspot bridge port') . '} else={/interface bridge port add bridge=' . self::q($bridge) . ' interface=$n comment=' . self::q('FASTNETPAY WiFi hotspot bridge port') . '}}} on-error={:log warning ' . self::q('FASTNETPAY no WiFi bridge ports added') . '}';
+        $commands[] = '# FASTNETPAY maps client ethernet/wireless bridge ports through direct API reconciliation after scripts run.';
 
         return $commands;
     }
@@ -1619,8 +1890,7 @@ class RouterProvisioning
             self::upsertByFind('/ip dns static find name=' . self::q($dnsName), '/ip dns static add name=' . self::q($dnsName) . ' address=' . self::q($gateway) . ' comment=' . self::q('FASTNETPAY hotspot portal DNS'), '/ip dns static set [find name=' . self::q($dnsName) . '] address=' . self::q($gateway) . ' comment=' . self::q('FASTNETPAY hotspot portal DNS')),
             self::upsertByFind('/ip hotspot profile find name=' . self::q('fastnetpay-hotspot-profile'), '/ip hotspot profile add name=' . self::q('fastnetpay-hotspot-profile') . ' hotspot-address=' . self::q($gateway) . ' dns-name=' . self::q($dnsName) . ' html-directory=' . self::q('hotspot') . ' login-by=http-chap,http-pap,cookie comment=' . self::q('FASTNETPAY hosted captive portal profile'), '/ip hotspot profile set [find name=' . self::q('fastnetpay-hotspot-profile') . '] hotspot-address=' . self::q($gateway) . ' dns-name=' . self::q($dnsName) . ' html-directory=' . self::q('hotspot') . ' login-by=http-chap,http-pap,cookie'),
             self::upsertByFind('/ip hotspot find name=' . self::q('fastnetpay-hotspot'), '/ip hotspot add name=' . self::q('fastnetpay-hotspot') . ' interface=' . self::q($hotspotInterface) . ' address-pool=' . self::q('fastnetpay-hotspot-pool') . ' profile=' . self::q('fastnetpay-hotspot-profile') . ' disabled=no comment=' . self::q('FASTNETPAY hotspot server'), '/ip hotspot set [find name=' . self::q('fastnetpay-hotspot') . '] interface=' . self::q($hotspotInterface) . ' address-pool=' . self::q('fastnetpay-hotspot-pool') . ' profile=' . self::q('fastnetpay-hotspot-profile') . ' disabled=no'),
-            ':do {/interface wireless set [find] mode=ap-bridge ssid=' . self::q('FastNet Test') . ' disabled=no} on-error={:log warning ' . self::q('FASTNETPAY no legacy wireless interface detected; use external AP for FastNet Test') . '}',
-            ':do {/interface wifi set [find] configuration.ssid=' . self::q('FastNet Test') . ' disabled=no} on-error={:log warning ' . self::q('FASTNETPAY no WiFi interface detected; use external AP for FastNet Test') . '}',
+            '# FASTNETPAY sets the FastNet Test SSID through direct API reconciliation after scripts run.',
         ]);
 
         $hotspotCount = 0;
@@ -1721,33 +1991,14 @@ class RouterProvisioning
         $base = self::hotspotApiBaseUrl($settings);
         $gateway = self::cidrIp($settings['lan_gateway'] ?? '192.168.90.1/24') ?: '192.168.90.1';
         $portal = self::domain($settings['dns_name'] ?? 'portal.fastnetpay.test', 'portal.fastnetpay.test');
-        $files = [
-            'index',
-            'index.html',
-            'login',
-            'login.html',
-            'rlogin.html',
-            'redirect.html',
-            'status.html',
-            'logout.html',
-            'alogin.html',
-            'error.html',
-            'radvert.html',
-            'capport.json',
-            'md5.js',
-            'fastnetpay-hotspot.css',
-            'fastnetpay-hotspot.js',
-        ];
-
         $commands = [
             '# FASTNETPAY MikroTik-hosted captive portal files.',
+            '# Portal files are uploaded over the authenticated RouterOS API during the direct reconciliation step.',
+            '# This avoids RouterOS v6 /tool fetch stalls behind HTTPS, Cloudflare, or captive-network DNS.',
         ];
 
-        foreach ($files as $file) {
-            $url = $base . '/?_route=api/hotspot/portal-file&router=' . $routerId . '&token=' . rawurlencode($token) . '&base=' . rawurlencode($base) . '&gateway=' . rawurlencode($gateway) . '&portal=' . rawurlencode($portal) . '&file=' . rawurlencode($file);
-            $commands[] = '/tool fetch url=' . self::q($url) . ' dst-path=' . self::q('hotspot/' . $file) . ' keep-result=yes';
-        }
-
+        $commands[] = ':log info ' . self::q('FASTNETPAY portal files will be uploaded over RouterOS API');
+        $commands[] = '# Files: ' . implode(', ', self::portalFileNames());
         $commands[] = '# Portal API base: ' . $base . '/?_route=api/hotspot';
 
             return $commands;
@@ -1759,6 +2010,7 @@ class RouterProvisioning
             $serverIp = self::ip($settings['vpn_server_ip'] ?? '', '10.100.0.1');
             $routerIp = self::ip($settings['vpn_router_ip'] ?? '', '10.100.1.1');
             $fastnetpayIp = self::ip($settings['fastnetpay_server_ip'] ?? '', self::defaultServerAddress());
+            $runningOverConfiguredVpn = self::isProvisioningOverConfiguredVpn($settings);
             $commands = [
                 '# FASTNETPAY remote management uses VPN first. Keep RouterOS API closed to the public internet.',
                 '# Recommended management range: 10.100.0.0/16. FASTNETPAY/VPS ' . $serverIp . ', this router ' . $routerIp . '.',
@@ -1779,12 +2031,22 @@ class RouterProvisioning
                     $commands[] = '# Paste the FASTNETPAY/VPS WireGuard public key to let the wizard add the server peer automatically.';
                 }
             } elseif ($mode === 'sstp') {
-                $server = self::cleanText($settings['sstp_server'] ?? '', 190);
+                $server = self::sstpConnectTo($settings['sstp_server'] ?? '', 4443);
                 $user = self::cleanText($settings['sstp_username'] ?? '', 120);
                 $pass = (string) ($settings['sstp_password'] ?? '');
                 $commands[] = '# SSTP is the fallback for older RouterOS v6 routers without WireGuard.';
-                if ($server !== '' && $user !== '' && $pass !== '') {
-                    $commands[] = self::upsertByFind('/interface sstp-client find name=' . self::q('fastnetpay-sstp'), '/interface sstp-client add name=' . self::q('fastnetpay-sstp') . ' connect-to=' . self::q($server) . ' user=' . self::q($user) . ' password=' . self::q($pass) . ' disabled=no comment=' . self::q('FASTNETPAY SSTP management tunnel'), '/interface sstp-client set [find name=' . self::q('fastnetpay-sstp') . '] connect-to=' . self::q($server) . ' user=' . self::q($user) . ' password=' . self::q($pass) . ' disabled=no comment=' . self::q('FASTNETPAY SSTP management tunnel'));
+                $commands[] = '# RouterOS v6 expects a custom SSTP port as connect-to=host:port. Do not add a separate port= argument on RB951.';
+                if ($runningOverConfiguredVpn) {
+                    $commands[] = '# FASTNETPAY is already managing this router through ' . $routerIp . '. Existing SSTP client is left untouched to avoid dropping the live API session.';
+                    $commands[] = '# To rotate SSTP credentials later, connect locally through the management port first, then rerun this step.';
+                } elseif ($server !== '' && $user !== '' && $pass !== '') {
+                    $commands[] = ':do {/tool fetch url=' . self::q('https://letsencrypt.org/certs/isrgrootx1.pem') . ' dst-path=' . self::q('fastnetpay-isrgrootx1.pem') . ' mode=https check-certificate=no keep-result=yes} on-error={:log warning ' . self::q('FASTNETPAY could not fetch Lets Encrypt root CA for SSTP') . '}';
+                    $commands[] = ':do {/certificate import file-name=' . self::q('fastnetpay-isrgrootx1.pem') . ' passphrase=' . self::q('') . '} on-error={:log info ' . self::q('FASTNETPAY SSTP CA import skipped or already exists') . '}';
+                    $commands[] = ':do {/certificate set [find common-name=' . self::q('ISRG Root X1') . '] trusted=yes} on-error={:log info ' . self::q('FASTNETPAY SSTP CA trust already set or unavailable') . '}';
+                    $commands[] = self::upsertByFind('/interface sstp-client find name=' . self::q('sstp-fastnetpay'), '/interface sstp-client add name=' . self::q('sstp-fastnetpay') . ' connect-to=' . self::q($server) . ' user=' . self::q($user) . ' password=' . self::q($pass) . ' profile=' . self::q('default-encryption') . ' verify-server-certificate=yes add-default-route=no disabled=no comment=' . self::q('FASTNETPAY SSTP management tunnel'), '/interface sstp-client set [find name=' . self::q('sstp-fastnetpay') . '] connect-to=' . self::q($server) . ' user=' . self::q($user) . ' password=' . self::q($pass) . ' profile=' . self::q('default-encryption') . ' verify-server-certificate=yes add-default-route=no disabled=no comment=' . self::q('FASTNETPAY SSTP management tunnel'));
+                    $commands[] = self::upsertByFind('/ip address find comment=' . self::q('FASTNETPAY stable router VPN API IP'), '/ip address add address=' . self::q($routerIp . '/32') . ' network=' . self::q($serverIp) . ' interface=' . self::q('sstp-fastnetpay') . ' comment=' . self::q('FASTNETPAY stable router VPN API IP'), '/ip address set [find comment=' . self::q('FASTNETPAY stable router VPN API IP') . '] address=' . self::q($routerIp . '/32') . ' network=' . self::q($serverIp) . ' interface=' . self::q('sstp-fastnetpay'));
+                    $commands[] = self::onceByFind('/interface list member find list=' . self::q('LAN') . ' interface=' . self::q('sstp-fastnetpay'), '/interface list member add list=' . self::q('LAN') . ' interface=' . self::q('sstp-fastnetpay') . ' comment=' . self::q('FASTNETPAY VPN management tunnel'));
+                    $commands[] = ':if ([:len [/ip firewall filter find comment=' . self::q('FASTNETPAY accept VPN management input') . ']] = 0) do={:do {/ip firewall filter add chain=input src-address=' . self::q($serverIp) . ' action=accept place-before=0 comment=' . self::q('FASTNETPAY accept VPN management input') . '} on-error={/ip firewall filter add chain=input src-address=' . self::q($serverIp) . ' action=accept comment=' . self::q('FASTNETPAY accept VPN management input') . '}}';
                 } else {
                     $commands[] = '# Add SSTP server, username, and password in the wizard before applying SSTP mode.';
                 }
@@ -1793,12 +2055,26 @@ class RouterProvisioning
             $restrictIp = (($settings['api_restrict_mode'] ?? 'local') === 'vpn') ? $serverIp : $fastnetpayIp;
             if ($restrictIp) {
                 $commands[] = self::onceByFind('/ip firewall address-list find list=' . self::q('fastnetpay-management') . ' address=' . self::q($restrictIp), '/ip firewall address-list add list=' . self::q('fastnetpay-management') . ' address=' . self::q($restrictIp) . ' comment=' . self::q('FASTNETPAY VPN/API management host'));
-                $commands[] = '/ip service set api address=' . self::q($restrictIp . '/32') . ' disabled=no';
-                $commands[] = ':do {/ip service set api-ssl address=' . self::q($restrictIp . '/32') . ' disabled=no} on-error={:log warning ' . self::q('FASTNETPAY API-SSL service not available') . '}';
-                $commands[] = '# API restriction target: ' . $restrictIp . ' (' . (($settings['api_restrict_mode'] ?? 'local') === 'vpn' ? 'VPN only' : 'local FASTNETPAY server') . ').';
+                if (($settings['api_restrict_mode'] ?? 'local') === 'vpn') {
+                    $commands[] = '# API service restriction to ' . $restrictIp . ' is deferred to Strict Security Hardening after the VPN final test passes. This prevents cutting off the active provisioning session.';
+                } else {
+                    $commands[] = '/ip service set api address=' . self::q($restrictIp . '/32') . ' disabled=no';
+                    $commands[] = ':do {/ip service set api-ssl address=' . self::q($restrictIp . '/32') . ' disabled=no} on-error={:log warning ' . self::q('FASTNETPAY API-SSL service not available') . '}';
+                    $commands[] = '# API restriction target: ' . $restrictIp . ' (' . (($settings['api_restrict_mode'] ?? 'local') === 'vpn' ? 'VPN only' : 'local FASTNETPAY server') . ').';
+                }
             }
 
             return $commands;
+        }
+
+        private static function isProvisioningOverConfiguredVpn($settings)
+        {
+            if (($settings['connection_mode'] ?? 'local') === 'local') {
+                return false;
+            }
+            $host = self::cidrIp($settings['host'] ?? '');
+            $vpnIp = self::cidrIp($settings['vpn_router_ip'] ?? '');
+            return $host !== '' && $vpnIp !== '' && $host === $vpnIp;
         }
 
     private static function buildSecurityScript($settings)
@@ -1831,14 +2107,18 @@ class RouterProvisioning
 
         if ($level === 'strict') {
             $commands[] = self::onceByFind('/ip firewall filter find comment=' . self::q('FASTNETPAY allow RouterOS API from server'), '/ip firewall filter add chain=input protocol=tcp dst-port=8728,8729 src-address=' . self::q($serverIp) . ' action=accept comment=' . self::q('FASTNETPAY allow RouterOS API from server'));
-            $commands[] = '/ip service set api address=' . self::q($serverIp . '/32') . ' disabled=no';
-            $commands[] = '/ip service set api-ssl address=' . self::q($serverIp . '/32') . ' disabled=no';
             $commands[] = '/ip service set telnet disabled=yes';
             $commands[] = '/ip service set ftp disabled=yes';
             $commands[] = '/ip service set www disabled=yes';
             $commands[] = '/ip service set www-ssl disabled=yes';
-            $commands[] = '/ip service set ssh address=' . self::q($serverIp . '/32');
-            $commands[] = '/ip service set winbox address=' . self::q($serverIp . '/32');
+            if (($settings['api_restrict_mode'] ?? 'local') === 'vpn' && !self::isProvisioningOverConfiguredVpn($settings)) {
+                $commands[] = '# API/SSH/Winbox restriction to ' . $serverIp . ' is deferred until the router is registered and reachable through VPN. Rerun strict hardening after VPN final test passes.';
+            } else {
+                $commands[] = '/ip service set api address=' . self::q($serverIp . '/32') . ' disabled=no';
+                $commands[] = '/ip service set api-ssl address=' . self::q($serverIp . '/32') . ' disabled=no';
+                $commands[] = '/ip service set ssh address=' . self::q($serverIp . '/32');
+                $commands[] = '/ip service set winbox address=' . self::q($serverIp . '/32');
+            }
             $commands[] = self::onceByFind('/ip firewall filter find comment=' . self::q('FASTNETPAY strict drop unmanaged WAN input'), '/ip firewall filter add chain=input in-interface-list=WAN src-address-list=!fastnetpay-management action=drop comment=' . self::q('FASTNETPAY strict drop unmanaged WAN input'));
         } else {
             $commands[] = '# Strict mode can additionally restrict API/Winbox/SSH/WWW to FASTNETPAY management IPs.';
@@ -1969,7 +2249,39 @@ class RouterProvisioning
         return ['ok' => false, 'files' => [], 'message' => $message, 'errors' => $errors];
     }
 
-    public static function reconcileCriticalProvisioningState($client, $settings, $plans = null, $router = null)
+    private static function markStaleProvisioningRuns($routerId)
+    {
+        if ((int) $routerId <= 0) {
+            return;
+        }
+        $cutoff = date('Y-m-d H:i:s', time() - 600);
+        $runs = ORM::for_table('router_provisioning_runs')
+            ->where('router_id', (int) $routerId)
+            ->where('status', 'running')
+            ->where_lte('started_at', $cutoff)
+            ->find_many();
+
+        foreach ($runs as $run) {
+            $message = 'Marked failed by FASTNETPAY because the previous provisioning HTTP/API request timed out before returning a final JSON response.';
+            $run->status = 'failed';
+            $run->completed_at = date('Y-m-d H:i:s');
+            $run->notes = trim((string) $run->notes) . "\n" . $message;
+            $run->save();
+
+            $steps = ORM::for_table('router_provisioning_steps')
+                ->where('run_id', (int) $run['id'])
+                ->where('status', 'running')
+                ->find_many();
+            foreach ($steps as $step) {
+                $step->status = 'failed';
+                $step->error_message = $message;
+                $step->completed_at = date('Y-m-d H:i:s');
+                $step->save();
+            }
+        }
+    }
+
+    public static function reconcileCriticalProvisioningState($client, $settings, $plans = null, $router = null, $runId = 0)
     {
         $settings = self::withDetectedServerIp($client, $settings);
         $plans = $plans === null ? self::selectedPlans(self::plans(), $settings) : $plans;
@@ -1988,6 +2300,7 @@ class RouterProvisioning
         $dnsName = self::domain($settings['dns_name'], 'portal.fastnetpay.test');
         $lease = self::lease($settings['dhcp_lease_time']);
 
+        self::logReconcileCheckpoint($runId, 'Bridge', 'running', 'Verifying bridge ' . $bridge . '.');
         self::apiUpsert($client, '/interface/bridge/print', '/interface/bridge/add', '/interface/bridge/set', 'name', $bridge, [
             'name' => $bridge,
             'protocol-mode' => 'none',
@@ -1997,12 +2310,16 @@ class RouterProvisioning
             'comment' => 'FASTNETPAY hotspot/LAN bridge',
         ]);
         $messages[] = 'Bridge verified: ' . $bridge;
+        self::logReconcileCheckpoint($runId, 'Bridge', 'success', 'Bridge verified: ' . $bridge . '.');
 
+        self::logReconcileCheckpoint($runId, 'Bridge Ports', 'running', 'Mapping client interfaces to ' . $bridge . ' while preserving ' . $management . '.');
         self::reconcileBridgePorts($client, $bridge, $wan, $management);
         self::reconcileBridgeMac($client, $bridge, $wan, $management);
         $messages[] = 'Bridge ports verified: client ethernet and wireless interfaces mapped to ' . $bridge . ', management kept on ' . $management . '.';
+        self::logReconcileCheckpoint($runId, 'Bridge Ports', 'success', 'Client bridge ports verified.');
 
         if ($expectsHotspot) {
+            self::logReconcileCheckpoint($runId, 'Hotspot Core', 'running', 'Verifying pool, gateway, DHCP, DNS, hotspot profile, and hotspot server.');
             self::apiUpsert($client, '/ip/pool/print', '/ip/pool/add', '/ip/pool/set', 'name', 'fastnetpay-hotspot-pool', [
                 'name' => 'fastnetpay-hotspot-pool',
                 'ranges' => self::pool($settings['hotspot_pool'], '192.168.90.50-192.168.90.250'),
@@ -2091,13 +2408,20 @@ class RouterProvisioning
             ]);
 
             self::reconcileHotspotProfiles($client, $plans);
+            self::logReconcileCheckpoint($runId, 'Hotspot Profiles', 'success', 'Hotspot package profiles verified.');
+            self::logReconcileCheckpoint($runId, 'Wireless SSID', 'running', 'Verifying FastNet Test SSID.');
             self::reconcileWirelessSsid($client, 'FastNet Test');
+            self::logReconcileCheckpoint($runId, 'Wireless SSID', 'success', 'FastNet Test SSID verified.');
+            self::logReconcileCheckpoint($runId, 'Portal Access', 'running', 'Verifying captive portal DNS, walled garden, and MikroTik files.');
             self::reconcilePortalAccess($client, $settings, $router);
+            self::logReconcileCheckpoint($runId, 'Portal Access', 'success', 'Captive portal DNS, access, and files verified.');
             self::refreshHotspotClientLeases($client);
             $messages[] = 'Hotspot verified: profile, server, DHCP, DNS/captive detection, pool, package profiles, and SSID.';
+            self::logReconcileCheckpoint($runId, 'Hotspot Core', 'success', 'Hotspot service verified.');
         }
 
         if ($expectsPppoe) {
+            self::logReconcileCheckpoint($runId, 'PPPoE Core', 'running', 'Verifying PPPoE pool, profiles, and server.');
             self::apiUpsert($client, '/ip/pool/print', '/ip/pool/add', '/ip/pool/set', 'name', 'fastnetpay-pppoe-pool', [
                 'name' => 'fastnetpay-pppoe-pool',
                 'ranges' => self::pool($settings['pppoe_pool'], '100.64.10.10-100.64.10.250'),
@@ -2121,9 +2445,18 @@ class RouterProvisioning
                 'disabled' => 'no',
             ]);
             $messages[] = 'PPPoE verified: pool, profiles, and server on ' . $pppoeInterface . '.';
+            self::logReconcileCheckpoint($runId, 'PPPoE Core', 'success', 'PPPoE service verified.');
         }
 
         return $messages;
+    }
+
+    private static function logReconcileCheckpoint($runId, $name, $status, $message)
+    {
+        if ((int) $runId <= 0) {
+            return;
+        }
+        self::logStep((int) $runId, 'RouterOS Direct Reconciliation - ' . $name, $status, $message, '');
     }
 
     private static function reconcileCaptiveDetection($client, $gateway, $network, $dnsName, $hotspotInterface)
@@ -2389,12 +2722,14 @@ class RouterProvisioning
         $gateway = self::cidrIp($settings['lan_gateway'] ?? '192.168.90.1/24') ?: '192.168.90.1';
         $portal = self::domain($settings['dns_name'] ?? 'portal.fastnetpay.test', 'portal.fastnetpay.test');
         foreach (self::portalFileNames() as $file) {
-            $url = $base . '/?_route=api/hotspot/portal-file&router=' . $routerId . '&token=' . rawurlencode($token) . '&base=' . rawurlencode($base) . '&gateway=' . rawurlencode($gateway) . '&portal=' . rawurlencode($portal) . '&file=' . rawurlencode($file);
-            $request = (new RouterOS\Request('/tool/fetch'))
-                ->setArgument('url', $url)
-                ->setArgument('dst-path', 'hotspot/' . $file)
-                ->setArgument('keep-result', 'yes');
-            self::throwOnTrap($client->sendSync($request), '/tool/fetch ' . $file);
+            $content = self::hotspotPortalFile($file, $router, $token, $base, $gateway, $portal);
+            if ($content === null) {
+                continue;
+            }
+            $request = (new RouterOS\Request('/file/set'))
+                ->setArgument('numbers', 'hotspot/' . $file)
+                ->setArgument('contents', $content);
+            self::throwOnTrap($client->sendSync($request), '/file/set hotspot/' . $file);
         }
     }
 
@@ -2437,13 +2772,22 @@ class RouterProvisioning
             }
         }
 
+        $bridgePorts = self::safeRows($client, '/interface/bridge/port/print');
         foreach (array_values(array_unique($interfaces)) as $interface) {
-            self::apiUpsert($client, '/interface/bridge/port/print', '/interface/bridge/port/add', '/interface/bridge/port/set', 'interface', $interface, [
+            $row = self::findRowBy($bridgePorts, 'interface', $interface);
+            if ($row && self::prop($row, 'bridge') === $bridge) {
+                continue;
+            }
+            if ($row) {
+                self::apiSet($client, '/interface/bridge/port/set', self::prop($row, '.id'), [
+                    'bridge' => $bridge,
+                    'comment' => 'FASTNETPAY hotspot/PPPoE bridge port',
+                ]);
+                continue;
+            }
+            self::apiAdd($client, '/interface/bridge/port/add', [
                 'bridge' => $bridge,
                 'interface' => $interface,
-                'comment' => 'FASTNETPAY hotspot/PPPoE bridge port',
-            ], [
-                'bridge' => $bridge,
                 'comment' => 'FASTNETPAY hotspot/PPPoE bridge port',
             ]);
         }
@@ -2475,6 +2819,10 @@ class RouterProvisioning
 
         $row = self::findRowBy(self::safeRows($client, '/interface/bridge/print'), 'name', $bridge);
         if (!$row) {
+            return;
+        }
+
+        if (strcasecmp(self::prop($row, 'admin-mac'), $mac) === 0 && self::prop($row, 'auto-mac') === 'false') {
             return;
         }
 
@@ -2573,6 +2921,11 @@ class RouterProvisioning
         foreach (self::safeRows($client, '/interface/wireless/print') as $row) {
             $id = self::prop($row, '.id');
             if ($id !== '') {
+                if (self::prop($row, 'ssid') === $ssid
+                    && self::prop($row, 'mode') === 'ap-bridge'
+                    && self::prop($row, 'disabled', 'false') === 'false') {
+                    continue;
+                }
                 self::apiSet($client, '/interface/wireless/set', $id, [
                     'mode' => 'ap-bridge',
                     'ssid' => $ssid,
@@ -2584,6 +2937,10 @@ class RouterProvisioning
         foreach (self::safeRows($client, '/interface/wifi/print') as $row) {
             $id = self::prop($row, '.id');
             if ($id !== '') {
+                if (self::prop($row, 'configuration.ssid') === $ssid
+                    && self::prop($row, 'disabled', 'false') === 'false') {
+                    continue;
+                }
                 try {
                     self::apiSet($client, '/interface/wifi/set', $id, [
                         'configuration.ssid' => $ssid,
@@ -2599,6 +2956,9 @@ class RouterProvisioning
     {
         $row = self::findRowBy(self::safeRows($client, $printPath), $property, $value);
         if ($row) {
+            if (self::apiArgsMatch($row, $setArgs)) {
+                return self::prop($row, '.id');
+            }
             self::apiSet($client, $setPath, self::prop($row, '.id'), $setArgs);
             return self::prop($row, '.id');
         }
@@ -2616,10 +2976,39 @@ class RouterProvisioning
             }
         }
         if ($row) {
+            if (self::apiArgsMatch($row, $setArgs)) {
+                return self::prop($row, '.id');
+            }
             self::apiSet($client, $setPath, self::prop($row, '.id'), $setArgs);
             return self::prop($row, '.id');
         }
         return self::apiAdd($client, $addPath, $addArgs);
+    }
+
+    private static function apiArgsMatch($row, $args)
+    {
+        foreach ((array) $args as $key => $value) {
+            if ($value === null || $value === '') {
+                continue;
+            }
+            if (self::normalizeRosValue(self::prop($row, $key)) !== self::normalizeRosValue((string) $value)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static function normalizeRosValue($value)
+    {
+        $value = trim((string) $value);
+        $lower = strtolower($value);
+        if ($lower === 'yes') {
+            return 'true';
+        }
+        if ($lower === 'no') {
+            return 'false';
+        }
+        return $value;
     }
 
     private static function apiAdd($client, $path, $args)
@@ -2730,8 +3119,12 @@ class RouterProvisioning
         return '';
     }
 
-    private static function applySection($client, $runId, $index, $section)
+    private static function applySection($client, $runId, $index, $section, $settings = [])
     {
+        if (($section['key'] ?? '') === 'vpn' && self::isProvisioningOverConfiguredVpn($settings)) {
+            self::logStep($runId, $section['name'] . ' VPN session guard', 'success', 'FASTNETPAY is already connected through VPN IP ' . self::cidrIp($settings['vpn_router_ip'] ?? '') . '. SSTP/WireGuard client recreation was skipped to preserve the live API session.', '');
+        }
+
         foreach ($section['commands'] as $line => $command) {
             $command = trim((string) $command);
             if ($command === '' || strpos($command, '#') === 0) {
@@ -2740,6 +3133,14 @@ class RouterProvisioning
 
             $scriptName = 'fnp_' . (int) $runId . '_' . (int) $index . '_' . ((int) $line + 1);
             $stepName = $section['name'] . ' command ' . ((int) $line + 1);
+            if (($section['key'] ?? '') === 'vpn'
+                && self::isProvisioningOverConfiguredVpn($settings)
+                && (strpos($command, '/interface sstp-client') !== false
+                    || strpos($command, '/interface wireguard') !== false
+                    || strpos($command, '/ip address') !== false)) {
+                self::logStep($runId, $stepName, 'warning', $command, 'Skipped because the current API session is already using the configured VPN IP.');
+                continue;
+            }
             self::logStep($runId, $stepName, 'running', $command, '');
 
             try {
@@ -2831,6 +3232,9 @@ class RouterProvisioning
             $row->management_allowed_mac = $settings['management_allowed_mac'] ?? '';
             $row->connection_mode = $settings['connection_mode'] ?? 'local';
             $row->vpn_ip = $settings['vpn_router_ip'] ?? '';
+            $row->sstp_server = $settings['sstp_server'] ?? '';
+            $row->sstp_username = $settings['sstp_username'] ?? '';
+            $row->sstp_password = $settings['sstp_password'] ?? '';
             $row->updated_at = date('Y-m-d H:i:s');
             $row->save();
         }
@@ -3322,6 +3726,11 @@ class RouterProvisioning
 
     public static function hotspotApiBaseUrl($settings = [])
     {
+        $secureBase = self::cleanBaseUrl($settings['secure_management_url'] ?? '');
+        if ($secureBase !== '') {
+            return $secureBase;
+        }
+
         $parts = parse_url(APP_URL);
         $scheme = $parts['scheme'] ?? 'http';
         $host = $parts['host'] ?? 'localhost';
@@ -3568,7 +3977,24 @@ CSS;
     private static function hotspotJs()
     {
         return <<<'JS'
-(function(){var c=window.FNP_HOTSPOT||{},selected=null,payment=null,timer=null,pollDelay=5000;function qs(id){return document.getElementById(id)}function esc(v){return String(v==null?"":v).replace(/[&<>"']/g,function(s){return({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"})[s]})}function msg(t,k){var el=qs("fnpMessage");if(el){el.className="fnp-message "+(k||"");el.textContent=t}}function login(j,delay){if(j&&j.username){qs("fnpLoginUser").value=j.username;qs("fnpLoginPass").value=j.password||j.username;setTimeout(function(){document.login.submit()},delay||1000)}}function api(action,data){data=data||{};data.router=c.routerId;data.token=c.token;data.mac=c.mac;data.ip=c.ip;return fetch(c.apiBase+"/"+action,{method:"POST",mode:"cors",credentials:"omit",cache:"no-store",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(data)}).then(function(r){return r.json().then(function(j){if(!r.ok||j.ok===false){throw new Error(j.message||"Request failed")}return j})})}function showTab(name){document.querySelectorAll(".fnp-tab-btn").forEach(function(b){b.classList.toggle("active",b.getAttribute("data-fnp-tab")===name)});document.querySelectorAll(".fnp-tab-panel").forEach(function(p){p.classList.toggle("active",p.id==="fnpTab"+name)})}function initTabs(){document.querySelectorAll("[data-fnp-tab]").forEach(function(b){b.onclick=function(){showTab(b.getAttribute("data-fnp-tab"))}})}function planCard(p){var b=document.createElement("button");b.type="button";b.className="fnp-plan";b.innerHTML='<span class="select">+</span><b>'+esc(p.name)+'</b><strong class="price">KES '+esc(p.price)+'</strong><span class="meta"><span class="fnp-chip">'+esc(p.validity||"Valid package")+'</span><span class="fnp-chip gold">'+esc(p.bandwidth||"Best available speed")+'</span><span class="fnp-chip">'+esc(p.limit||"Unlimited data")+'</span></span><span class="cta">Select package and proceed</span>';b.onclick=function(){selected=p.id;document.querySelectorAll(".fnp-plan").forEach(function(x){x.classList.remove("active");var s=x.querySelector(".select");if(s)s.textContent="+"});b.classList.add("active");var mark=b.querySelector(".select");if(mark)mark.textContent="OK";showTab("Pay");msg("Selected "+p.name+". Enter your M-Pesa phone.","ok");var phone=qs("fnpPhone");if(phone)phone.focus()};return b}function load(){api("packages",{}).then(function(j){var box=qs("fnpPackages");box.innerHTML="";(j.packages||[]).forEach(function(p){box.appendChild(planCard(p))});msg(j.packages&&j.packages.length?"Choose a package to continue.":"No packages are available yet.",j.packages&&j.packages.length?"ok":"err")}).catch(function(e){msg(e.message,"err")})}function poll(){if(!payment)return;api("payment-status",{payment_id:payment.payment_id,payment_token:payment.payment_token}).then(function(j){if(j.status==="paid"){clearInterval(timer);msg("Payment received. Logging you in...","ok");login(j,1200)}else if(j.status==="failed"){clearInterval(timer);msg(j.message||"Payment failed or was cancelled.","err")}else{msg(j.message||"Payment pending. Check your phone.","ok")}}).catch(function(e){msg(e.message,"err")})}function pay(){var btn=qs("fnpPay"),phone=qs("fnpPhone").value;if(!selected){msg("Select a package first.","err");return}btn.disabled=true;api("pay",{plan_id:selected,phone:phone}).then(function(j){payment=j;pollDelay=Math.max(3000,parseInt(j.polling_interval||5,10)*1000);msg(j.message||"Check your phone and enter your M-Pesa PIN.","ok");clearInterval(timer);timer=setInterval(poll,pollDelay)}).catch(function(e){msg(e.message,"err")}).finally(function(){btn.disabled=false})}function voucher(){api("voucher-login",{voucher:qs("fnpVoucher").value}).then(function(j){msg(j.message,"ok");login(j,1000)}).catch(function(e){msg(e.message,"err")})}function reconnect(){var btn=qs("fnpReconnectBtn");btn.disabled=true;api("reconnect",{transaction_code:qs("fnpReceipt").value,phone:qs("fnpReconnectPhone").value}).then(function(j){msg(j.message||"Payment found. Logging you in...","ok");login(j,1000)}).catch(function(e){msg(e.message,"err")}).finally(function(){btn.disabled=false})}initTabs();qs("fnpPay").onclick=pay;qs("fnpVoucherBtn").onclick=voucher;qs("fnpReconnectBtn").onclick=reconnect;load()})();
+(function(){
+  var c=window.FNP_HOTSPOT||{},S=0,P=null,T=null;
+  var $=function(i){return document.getElementById(i)};
+  var E=function(v){return String(v==null?"":v).replace(/[&<>"']/g,function(s){return({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"})[s]})};
+  var M=function(t,k){var e=$("fnpMessage");if(e){e.className="fnp-message "+(k||"");e.textContent=t}};
+  var Q=function(o){var a=[],k;for(k in o)a.push(encodeURIComponent(k)+"="+encodeURIComponent(o[k]));return a.join("&")};
+  var A=function(a,d){d=d||{};d.router=c.routerId;d.token=c.token;d.mac=c.mac;d.ip=c.ip;return fetch(c.apiBase+"/"+a,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:Q(d)}).then(function(r){return r.json().then(function(j){if(!r.ok||j.ok===false)throw Error(j.message||"Request failed");return j})})};
+  var L=function(j){if(j&&j.username){$("fnpLoginUser").value=j.username;$("fnpLoginPass").value=j.password||j.username;setTimeout(function(){document.login.submit()},650)}};
+  var B=function(n){[].forEach.call(document.querySelectorAll(".fnp-tab-btn"),function(b){b.classList.toggle("active",b.getAttribute("data-fnp-tab")===n)});[].forEach.call(document.querySelectorAll(".fnp-tab-panel"),function(p){p.classList.toggle("active",p.id==="fnpTab"+n)})};
+  var C=function(p){var b=document.createElement("button");b.type="button";b.className="fnp-plan";b.innerHTML='<span class="select">+</span><b>'+E(p.name)+'</b><strong class="price">KES '+E(p.price)+'</strong><span class="meta"><span class="fnp-chip">'+E(p.validity||"Valid package")+'</span><span class="fnp-chip gold">'+E(p.bandwidth||"Best speed")+'</span><span class="fnp-chip">'+E(p.limit||"Unlimited")+'</span></span><span class="cta">Select package</span>';b.onclick=function(){S=p.id;[].forEach.call(document.querySelectorAll(".fnp-plan"),function(x){x.classList.remove("active");var s=x.querySelector(".select");if(s)s.textContent="+"});b.classList.add("active");b.querySelector(".select").textContent="OK";B("Pay");M("Selected "+p.name+". Enter M-Pesa phone.","ok");$("fnpPhone").focus()};return b};
+  var G=function(){A("packages",{}).then(function(j){var x=$("fnpPackages");x.innerHTML="";(j.packages||[]).forEach(function(p){x.appendChild(C(p))});M(j.packages&&j.packages.length?"Choose a package to continue.":"No packages available.",j.packages&&j.packages.length?"ok":"err")}).catch(function(e){M(e.message,"err")})};
+  var O=function(){if(!P)return;A("payment-status",{payment_id:P.payment_id,payment_token:P.payment_token}).then(function(j){if(j.status==="paid"){clearInterval(T);M("Payment received. Connecting...","ok");L(j)}else if(j.status==="failed"){clearInterval(T);M(j.message||"Payment failed or cancelled.","err")}else M(j.message||"Payment pending. Check your phone.","ok")}).catch(function(e){M(e.message,"err")})};
+  [].forEach.call(document.querySelectorAll("[data-fnp-tab]"),function(b){b.onclick=function(){B(b.getAttribute("data-fnp-tab"))}});
+  $("fnpPay").onclick=function(){if(!S)return M("Select a package first.","err");var b=this;b.disabled=true;A("pay",{plan_id:S,phone:$("fnpPhone").value}).then(function(j){P=j;M(j.message||"Check your phone and enter PIN.","ok");clearInterval(T);T=setInterval(O,Math.max(3000,parseInt(j.polling_interval||5,10)*1000))}).catch(function(e){M(e.message,"err")}).then(function(){b.disabled=false})};
+  $("fnpVoucherBtn").onclick=function(){A("voucher-login",{voucher:$("fnpVoucher").value}).then(function(j){M(j.message,"ok");L(j)}).catch(function(e){M(e.message,"err")})};
+  $("fnpReconnectBtn").onclick=function(){var b=this;b.disabled=true;A("reconnect",{transaction_code:$("fnpReceipt").value,phone:$("fnpReconnectPhone").value}).then(function(j){M(j.message||"Payment found. Connecting...","ok");L(j)}).catch(function(e){M(e.message,"err")}).then(function(){b.disabled=false})};
+  A("session",{}).then(function(j){if(j.status==="active"){M(j.message||"Active package found. Connecting...","ok");L(j);return}M(j.message||"Checking available packages...","");G()}).catch(function(){G()});
+})();
 JS;
     }
 
@@ -3677,6 +4103,27 @@ JS;
         return $port > 0 && $port <= 65535 ? $port : (int) $default;
     }
 
+    private static function sstpConnectTo($value, $defaultPort = 4443)
+    {
+        $value = trim(strip_tags((string) $value));
+        if ($value === '') {
+            return '';
+        }
+
+        if (preg_match('#^https?://#i', $value)) {
+            $host = parse_url($value, PHP_URL_HOST);
+            $port = parse_url($value, PHP_URL_PORT);
+            $value = $host ? $host . ($port ? ':' . (int) $port : '') : $value;
+        }
+
+        $value = preg_replace('/[\\s\\/]+.*/', '', $value);
+        if (strpos($value, ':') === false) {
+            $value .= ':' . (int) $defaultPort;
+        }
+
+        return substr($value, 0, 190);
+    }
+
     private static function choice($value, $choices, $default)
     {
         return in_array($value, $choices, true) ? $value : $default;
@@ -3707,6 +4154,11 @@ JS;
     {
         $value = strip_tags((string) $value);
         return substr($value, 0, 2000);
+    }
+
+    public static function redactForLog($value)
+    {
+        return self::redact($value);
     }
 
     private static function redact($value)

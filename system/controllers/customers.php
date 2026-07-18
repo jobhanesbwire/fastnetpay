@@ -287,18 +287,26 @@ switch ($action) {
                 $p = Tenant::scopeIfTenant(ORM::for_table('tbl_plans'))->where('id', $b['plan_id'])->find_one();
                 if ($p) {
                     $routers[] = $b['routers'];
+                    if (!empty($b['routers'])) {
+                        $p->routers = $b['routers'];
+                    }
                     $dvc = Package::getDevice($p);
                     if ($_app_stage != 'demo') {
-                        if (file_exists($dvc)) {
-                            require_once $dvc;
-                            $device = new $p['device'];
-                            if (method_exists($device, 'sync_customer')) {
-                                $device->sync_customer($c, $p);
-                            }else{
-                                $device->add_customer($c, $p);
+                        try {
+                            if (file_exists($dvc)) {
+                                require_once $dvc;
+                                $device = new $p['device'];
+                                if (method_exists($device, 'sync_customer')) {
+                                    $device->sync_customer($c, $p);
+                                } else {
+                                    $device->add_customer($c, $p);
+                                }
+                            } else {
+                                throw new Exception(Lang::T("Devices Not Found"));
                             }
-                        } else {
-                            new Exception(Lang::T("Devices Not Found"));
+                        } catch (Throwable $e) {
+                            _log('FASTNETPAY customer sync failed for ' . $c['username'] . ' on ' . $b['routers'] . ': ' . $e->getMessage(), 'Sync', 0);
+                            r2(getUrl('customers/view/') . $id_customer, 'e', 'Sync failed to ' . $b['routers'] . ': ' . $e->getMessage());
                         }
                     }
                 }

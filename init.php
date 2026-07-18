@@ -88,10 +88,11 @@ if ($_app_stage != 'Live') {
 if (class_exists('PerformanceProfiler')) {
     PerformanceProfiler::boot($_app_stage ?? '', $config ?? []);
 }
+$runtime_app_url = class_exists('Text') ? Text::runtimeBaseUrl() : APP_URL;
 if ($isApi) {
-    define('U', APP_URL . '/system/api.php?r=');
+    define('U', $runtime_app_url . '/system/api.php?r=');
 } else {
-    define('U', APP_URL . '/?_route=');
+    define('U', $runtime_app_url . '/?_route=');
 }
 
 // notification message

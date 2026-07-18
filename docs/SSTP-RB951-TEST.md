@@ -24,10 +24,16 @@ Before testing on the router:
 Template MikroTik command:
 
 ```routeros
-/interface sstp-client add name=sstp-fastnetpay connect-to=sstp.fastnetpay.co.ke port=4443 user=ROUTER_SPECIFIC_USERNAME password=ROUTER_SPECIFIC_PASSWORD profile=default-encryption verify-server-certificate=yes add-default-route=no disabled=no
+/tool fetch url="https://letsencrypt.org/certs/isrgrootx1.pem" dst-path=fastnetpay-isrgrootx1.pem mode=https check-certificate=no keep-result=yes
+/certificate import file-name=fastnetpay-isrgrootx1.pem passphrase=""
+/certificate set [find common-name="ISRG Root X1"] trusted=yes
+/interface sstp-client add name=sstp-fastnetpay connect-to=sstp.fastnetpay.co.ke:4443 user=ROUTER_SPECIFIC_USERNAME password=ROUTER_SPECIFIC_PASSWORD profile=default-encryption verify-server-certificate=yes add-default-route=no disabled=no comment="FASTNETPAY SSTP management tunnel"
+/ip address add address=10.100.1.1/32 network=10.100.0.1 interface=sstp-fastnetpay comment="FASTNETPAY stable router VPN API IP"
+/ip firewall filter add chain=input src-address=10.100.0.1 action=accept place-before=0 comment="FASTNETPAY accept VPN management input"
+/interface list member add list=LAN interface=sstp-fastnetpay comment="FASTNETPAY VPN management tunnel"
 ```
 
-Do not replace the router's default route. The SSTP tunnel is for FASTNETPAY management/API traffic only.
+Do not replace the router's default route. The SSTP tunnel is for FASTNETPAY management/API traffic only. RB951/RouterOS v6 rejects the newer `port=4443` one-liner form, so use `connect-to=sstp.fastnetpay.co.ke:4443`.
 
 Current production status:
 
@@ -38,16 +44,21 @@ Current production status:
   - `/export file=before_fastnetpay_sstp`
   - `/system backup save name=before_fastnetpay_sstp`
 - SSTP server installation is handled by `scripts/production/install-sstp-accel-ppp.sh`, which builds `accel-ppp` and creates `fastnetpay-sstp.service`.
+- The production test RB951 succeeded after importing `ISRG Root X1`, setting `verify-server-certificate=yes`, and pinning `10.100.1.1/32` on `sstp-fastnetpay`.
+- The VPS route hook must be installed so `/etc/ppp/chap-secrets` fourth-column addresses route to the live PPP interface.
 
-Blocked item:
+Production test result:
 
-Do not push SSTP client commands until the server is installed, listening on `4443/tcp`, and the router has a unique account/IP from `scripts/production/add-sstp-router.sh`.
+- The tunnel authenticated as the router-specific SSTP account.
+- The VPS reached `10.100.1.1` by ICMP.
+- The FASTNETPAY PHP container opened TCP `10.100.1.1:8728`.
 
 Minimum server requirements:
 
 - Unique username/password per router.
 - Fixed or traceable VPN IP per router.
-- Strong TLS certificate.
+- Dedicated RSA TLS certificate for `sstp.fastnetpay.co.ke`. The RB951/RouterOS v6 test path fails against the ECDSA wildcard certificate.
+- No `host-name=` SNI requirement in the `accel-ppp` `[sstp]` section because RouterOS v6 does not send SSTP client SNI.
 - Authentication failure rate limiting.
 - Log rotation.
 - Service enabled at boot.

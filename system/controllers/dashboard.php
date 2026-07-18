@@ -63,10 +63,10 @@ for ($i = 0; $i < $count; $i++) {
 
 $ui->assign('widgets', $widgets);
 $ui->assign('expiry_health', ExpiryWorker::health($UPLOAD_PATH));
-$ui->assign('ops_analytics', fnp_dashboard_ops_analytics());
+$ui->assign('ops_analytics', fnp_dashboard_ops_analytics($CACHE_PATH));
 if (($admin['user_type'] ?? '') === 'SuperAdmin' && class_exists('SaasBilling')) {
     try {
-        $ui->assign('saas_analytics', SaasBilling::analytics());
+        $ui->assign('saas_analytics', fnp_dashboard_saas_analytics($CACHE_PATH));
     } catch (Throwable $e) {
         $ui->assign('saas_analytics_error', $e->getMessage());
     }
@@ -77,19 +77,32 @@ $ui->display('admin/dashboard.tpl');
 function fnp_dashboard_table_exists($table)
 {
     global $db_name;
+    static $tableCache = [];
+
+    if (isset($tableCache[$table])) {
+        return $tableCache[$table];
+    }
+
     try {
         $row = ORM::for_table('information_schema.TABLES')
             ->where('TABLE_SCHEMA', $db_name)
             ->where('TABLE_NAME', $table)
             ->find_one();
-        return (bool) $row;
+        $tableCache[$table] = (bool) $row;
+        return $tableCache[$table];
     } catch (Throwable $e) {
+        $tableCache[$table] = false;
         return false;
     }
 }
 
-function fnp_dashboard_ops_analytics()
+function fnp_dashboard_ops_analytics($cachePath = null)
 {
+    $cached = fnp_dashboard_read_cache($cachePath, 'dashboard_ops_analytics');
+    if ($cached !== null) {
+        return $cached;
+    }
+
     $data = [
         'pos_today' => 0,
         'pos_month' => 0,
@@ -113,5 +126,105 @@ function fnp_dashboard_ops_analytics()
         $row = Tenant::scopeIfTenant(ORM::for_table('tbl_customers')->select_expr('COALESCE(SUM(balance),0)', 'balance_total')->where('service_type', 'PPPoE'))->find_one();
         $data['pppoe_balance'] = (float) ($row['balance_total'] ?? 0);
     }
+    fnp_dashboard_write_cache($cachePath, 'dashboard_ops_analytics', $data);
     return $data;
+}
+
+function fnp_dashboard_saas_analytics($cachePath = null)
+{
+    $cached = fnp_dashboard_read_cache($cachePath, 'dashboard_saas_analytics');
+    if ($cached !== null) {
+        return $cached;
+    }
+
+    $data = [
+        'tenants' => [
+            'total' => 0,
+            'active' => 0,
+            'suspended' => 0,
+        ],
+        'routers' => [
+            'total' => 0,
+            'online' => 0,
+            'offline' => 0,
+        ],
+        'clients' => [
+            'total' => 0,
+            'hotspot' => 0,
+            'pppoe' => 0,
+        ],
+        'financial' => [
+            'expected' => 0,
+            'overdue' => 0,
+        ],
+    ];
+
+    if (fnp_dashboard_table_exists('tenants')) {
+        $data['tenants']['total'] = (int) ORM::for_table('tenants')->count();
+        $data['tenants']['active'] = (int) ORM::for_table('tenants')->where('status', 'active')->count();
+        $data['tenants']['suspended'] = (int) ORM::for_table('tenants')->where('status', 'suspended')->count();
+    }
+
+    $data['routers']['total'] = (int) ORM::for_table('tbl_routers')->count();
+    $data['routers']['online'] = (int) ORM::for_table('tbl_routers')
+        ->where('enabled', '1')
+        ->where_raw("(status IS NULL OR status = '' OR LOWER(status) IN ('online', 'up', 'active', '1'))")
+        ->count();
+    $data['routers']['offline'] = max(0, $data['routers']['total'] - $data['routers']['online']);
+
+    $data['clients']['total'] = (int) ORM::for_table('tbl_customers')->count();
+    if (class_exists('Tenant') && Tenant::hasColumn('tbl_user_recharges', 'type')) {
+        $data['clients']['hotspot'] = (int) ORM::for_table('tbl_user_recharges')->where('type', 'Hotspot')->count();
+        $data['clients']['pppoe'] = (int) ORM::for_table('tbl_user_recharges')->where_raw('UPPER(type) = ?', ['PPPOE'])->count();
+    }
+
+    if (fnp_dashboard_table_exists('tenant_billing_snapshots')) {
+        $snapshot = ORM::for_table('tenant_billing_snapshots')
+            ->select_expr('COALESCE(SUM(amount_due), 0)', 'expected')
+            ->where('billing_month', date('Y-m'))
+            ->find_one();
+        $data['financial']['expected'] = (float) ($snapshot['expected'] ?? 0);
+    }
+
+    if (fnp_dashboard_table_exists('saas_invoices')) {
+        $invoice = ORM::for_table('saas_invoices')
+            ->select_expr('COALESCE(SUM(total_due), 0)', 'overdue')
+            ->where_not_equal('status', 'paid')
+            ->where_lt('grace_until', date('Y-m-d'))
+            ->find_one();
+        $data['financial']['overdue'] = (float) ($invoice['overdue'] ?? 0);
+    }
+
+    fnp_dashboard_write_cache($cachePath, 'dashboard_saas_analytics', $data);
+    return $data;
+}
+
+function fnp_dashboard_read_cache($cachePath, $name)
+{
+    $file = fnp_dashboard_cache_file($cachePath, $name);
+    if ($file === null || !is_file($file) || (time() - filemtime($file)) > 60) {
+        return null;
+    }
+
+    $data = @unserialize((string) file_get_contents($file), ['allowed_classes' => false]);
+    return is_array($data) ? $data : null;
+}
+
+function fnp_dashboard_write_cache($cachePath, $name, $data)
+{
+    $file = fnp_dashboard_cache_file($cachePath, $name);
+    if ($file !== null) {
+        @file_put_contents($file, serialize($data), LOCK_EX);
+    }
+}
+
+function fnp_dashboard_cache_file($cachePath, $name)
+{
+    if (!$cachePath || !is_dir($cachePath)) {
+        return null;
+    }
+
+    $tenant = class_exists('Tenant') && Tenant::currentId() ? Tenant::currentId() : 'main';
+    $key = preg_replace('/[^A-Za-z0-9_-]/', '_', $name . '_' . $tenant);
+    return rtrim($cachePath, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $key . '.temp';
 }

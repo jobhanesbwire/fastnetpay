@@ -96,6 +96,16 @@
                         Prefer API-SSL when the router supports it
                     </label>
                     <div id="fnpProvisionDetectResult" class="fnp-provision-detect"></div>
+                    <div class="fnp-provision-callout">
+                        <strong>Reset router or remote production router?</strong>
+                        If this router was reset, production cannot reach it until the MikroTik first dials home over SSTP. Generate the bootstrap, paste it once in Winbox Terminal, then test connection again using the VPN IP.
+                    </div>
+                    <div class="fnp-provision-toolbar">
+                        <button type="button" id="fnpProvisionBootstrap" class="btn btn-warning"><i class="fa fa-terminal"></i> Generate Reset Router Bootstrap</button>
+                        <button type="button" id="fnpProvisionBootstrapCopy" class="btn btn-default"><i class="fa fa-copy"></i> Copy Bootstrap</button>
+                    </div>
+                    <div id="fnpProvisionBootstrapResult" class="fnp-provision-warnings"></div>
+                    <pre id="fnpProvisionBootstrapScript" class="fnp-provision-script">For a reset router, fill SSTP/API settings, click Generate Reset Router Bootstrap, then paste the script into MikroTik Terminal.</pre>
                 </div>
             </section>
 
@@ -153,10 +163,10 @@
                 <div class="fnp-provision-card">
                     <h3>IP, DHCP & Pool Setup</h3>
                     <div class="fnp-provision-grid">
-                        <label>LAN Gateway IP/CIDR <input type="text" name="lan_gateway" class="form-control" value="{$settings.lan_gateway|escape}" placeholder="192.168.90.1/24"></label>
-                        <label>Hotspot IP Pool <input type="text" name="hotspot_pool" class="form-control" value="{$settings.hotspot_pool|escape}" placeholder="192.168.90.50-192.168.90.250"></label>
+                        <label>LAN Gateway IP/CIDR <input type="text" name="lan_gateway" class="form-control" value="{$settings.lan_gateway|escape}" placeholder="10.100.90.1/24"><small class="fnp-provision-muted">For SSTP/WireGuard sites use a 10.100.x.x customer subnet such as <code>10.100.90.1/24</code>. Local-only lab routers can still use <code>192.168.90.1/24</code>.</small></label>
+                        <label>Hotspot IP Pool <input type="text" name="hotspot_pool" class="form-control" value="{$settings.hotspot_pool|escape}" placeholder="10.100.90.50-10.100.90.250"></label>
                         <label>PPPoE IP Pool <input type="text" name="pppoe_pool" class="form-control" value="{$settings.pppoe_pool|escape}" placeholder="100.64.10.10-100.64.10.250"></label>
-                        <label>DHCP Range <input type="text" name="dhcp_range" class="form-control" value="{$settings.dhcp_range|escape}" placeholder="192.168.90.50-192.168.90.250"></label>
+                        <label>DHCP Range <input type="text" name="dhcp_range" class="form-control" value="{$settings.dhcp_range|escape}" placeholder="10.100.90.50-10.100.90.250"></label>
                         <label>DNS Servers <input type="text" name="dns_servers" class="form-control" value="{$settings.dns_servers|escape}" placeholder="1.1.1.1,8.8.8.8"></label>
                         <label>Local Portal DNS Name <input type="text" name="dns_name" class="form-control" value="{$settings.dns_name|escape}" placeholder="portal.fastnetpay.test"></label>
                         <label>DHCP Lease Time <input type="text" name="dhcp_lease_time" class="form-control" value="{$settings.dhcp_lease_time|escape}" placeholder="12h"></label>
@@ -245,7 +255,7 @@
                             <label>Secure Management URL <input type="url" name="secure_management_url" class="form-control" value="{$settings.secure_management_url|escape}" placeholder="https://fastnetpay.co.ke:3054"></label>
                             <label>WireGuard Router Private Key <input type="password" name="wireguard_private_key" class="form-control" value="{$settings.wireguard_private_key|escape}" autocomplete="new-password"></label>
                             <label>WireGuard FASTNETPAY Public Key <input type="text" name="wireguard_public_key" class="form-control" value="{$settings.wireguard_public_key|escape}"></label>
-                            <label>SSTP Server <input type="text" name="sstp_server" class="form-control" value="{$settings.sstp_server|escape}" placeholder="vpn.fastnetpay.co.ke"></label>
+                            <label>SSTP Server <input type="text" name="sstp_server" class="form-control" value="{$settings.sstp_server|escape}" placeholder="sstp.fastnetpay.co.ke:4443"><small class="fnp-provision-muted">RouterOS v6 uses <code>host:port</code> in the server field. Keep this DNS-only, not Cloudflare proxied.</small></label>
                             <label>SSTP Username <input type="text" name="sstp_username" class="form-control" value="{$settings.sstp_username|escape}" autocomplete="off"></label>
                             <label>SSTP Password <input type="password" name="sstp_password" class="form-control" value="{$settings.sstp_password|escape}" autocomplete="new-password"></label>
                             <label>Future Tenant ID <input type="number" name="tenant_id" class="form-control" value="{$settings.tenant_id|escape}" min="0"><small class="fnp-provision-muted">Leave 0 in current single-tenant FASTNETPAY.</small></label>
@@ -264,7 +274,7 @@
                         <label><input type="radio" name="security_level" value="strict" {if $settings.security_level eq 'strict'}checked{/if}> <span><b>Strict ISP Mode</b><small>Restricts management services to FASTNETPAY server IP.</small></span></label>
                     </div>
                     <div class="fnp-provision-grid">
-                        <label>FASTNETPAY Server IP <input type="text" name="fastnetpay_server_ip" class="form-control" value="{$settings.fastnetpay_server_ip|escape}" placeholder="192.168.88.10"></label>
+                        <label>Router-Facing FASTNETPAY Server IP <input type="text" name="fastnetpay_server_ip" class="form-control" value="{$settings.fastnetpay_server_ip|escape}" placeholder="10.100.0.1"><small class="fnp-provision-muted">For SSTP/WireGuard use <code>10.100.0.1</code>. Do not enter the Cloudflare/public IP here; the customer portal still uses <code>mother.fastnetpay.co.ke</code>.</small></label>
                         <label>RADIUS Shared Secret <input type="text" name="radius_secret" class="form-control" value="{$settings.radius_secret|escape}" autocomplete="off"></label>
                     </div>
                     <label>Custom Walled Garden Domains

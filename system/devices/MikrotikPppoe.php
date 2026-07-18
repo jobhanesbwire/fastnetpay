@@ -252,6 +252,9 @@ class MikrotikPppoe
             RouterOS\Query::where('name', $plan['name_plan'])
         );
         $profileID = $client->sendSync($printRequest)->getProperty('.id');
+        if (empty($profileID)) {
+            return;
+        }
 
         $removeRequest = new RouterOS\Request('/ppp/profile/remove');
         $client->sendSync(
@@ -312,6 +315,9 @@ class MikrotikPppoe
             RouterOS\Query::where('name', $pool['pool_name'])
         );
         $poolID = $client->sendSync($printRequest)->getProperty('.id');
+        if (empty($poolID)) {
+            return;
+        }
         $removeRequest = new RouterOS\Request('/ip/pool/remove');
         $client->sendSync(
             $removeRequest
@@ -364,6 +370,9 @@ class MikrotikPppoe
         //$printRequest->setArgument('.proplist', '.id');
         $printRequest->setQuery(RouterOS\Query::where('name', $username));
         $id = $client->sendSync($printRequest)->getProperty('.id');
+        if (empty($id)) {
+            return;
+        }
         $removeRequest = new RouterOS\Request('/ppp/secret/remove');
         $removeRequest->setArgument('numbers', $id);
         $client->sendSync($removeRequest);
@@ -401,6 +410,9 @@ class MikrotikPppoe
         $onlineRequest->setArgument('.proplist', '.id');
         $onlineRequest->setQuery(RouterOS\Query::where('name', $username));
         $id = $client->sendSync($onlineRequest)->getProperty('.id');
+        if (empty($id)) {
+            return;
+        }
 
         $removeRequest = new RouterOS\Request('/ppp/active/remove');
         $removeRequest->setArgument('numbers', $id);

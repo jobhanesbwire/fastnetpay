@@ -69,6 +69,40 @@ function fnp_plan_router_exists($routerName)
     return (bool) Tenant::scopeIfTenant($query)->find_one();
 }
 
+function fnp_plan_sync_customer($customer, $plan, $recharge)
+{
+    global $_app_stage;
+
+    if (!empty($recharge['routers'])) {
+        $plan->routers = $recharge['routers'];
+    }
+
+    $routerName = $plan['routers'] ?: $recharge['routers'];
+    $label = htmlspecialchars($customer['username'] . ' - ' . $recharge['namebp'] . ' - ' . $recharge['type'] . ' - ' . $routerName, ENT_QUOTES, 'UTF-8');
+    $dvc = Package::getDevice($plan);
+
+    if ($_app_stage == 'demo' || $_app_stage == 'Demo') {
+        return 'SKIPPED : ' . $label . ' | Demo mode<br>';
+    }
+    if (!file_exists($dvc)) {
+        return 'FAILED : ' . $label . ' | Device Not Found<br>';
+    }
+
+    try {
+        require_once $dvc;
+        $device = new $plan['device'];
+        if (method_exists($device, 'sync_customer')) {
+            $device->sync_customer($customer, $plan);
+        } else {
+            $device->add_customer($customer, $plan);
+        }
+        return 'DONE : ' . $label . '<br>';
+    } catch (Throwable $e) {
+        _log('FASTNETPAY sync failed for ' . $customer['username'] . ' on ' . $routerName . ': ' . $e->getMessage(), 'Sync', 0);
+        return 'FAILED : ' . $label . ' | ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '<br>';
+    }
+}
+
 function fnp_plan_render_recharge_list($title, $dateMode = '', $forcedStatus = null)
 {
     global $ui;
@@ -139,26 +173,12 @@ switch ($action) {
         $tursQuery = ORM::for_table('tbl_user_recharges')->where('status', 'on');
         $turs = Tenant::scopeIfTenant($tursQuery)->find_many();
         $log = '';
-        $router = '';
         foreach ($turs as $tur) {
             $p = fnp_plan_plan($tur['plan_id']);
             if ($p) {
                 $c = fnp_plan_customer($tur['customer_id']);
                 if ($c) {
-                    $dvc = Package::getDevice($p);
-                    if ($_app_stage != 'demo') {
-                        if (file_exists($dvc)) {
-                            require_once $dvc;
-                            if (method_exists($dvc, 'sync_customer')) {
-                                (new $p['device'])->sync_customer($c, $p);
-                            } else {
-                                (new $p['device'])->add_customer($c, $p);
-                            }
-                        } else {
-                            new Exception(Lang::T("Devices Not Found"));
-                        }
-                    }
-                    $log .= "DONE : $tur[username], $ptur[namebp], $tur[type], $tur[routers]<br>";
+                    $log .= fnp_plan_sync_customer($c, $p, $tur);
                 } else {
                     $log .= "Customer NOT FOUND : $tur[username], $tur[namebp], $tur[type], $tur[routers]<br>";
                 }

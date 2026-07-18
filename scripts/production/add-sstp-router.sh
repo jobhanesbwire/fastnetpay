@@ -54,9 +54,22 @@ Password: ${PASSWORD}
 Router VPN IP: ${ROUTER_IP}
 
 RouterOS v6 RB951 command:
-/interface sstp-client add name=sstp-fastnetpay connect-to=sstp.fastnetpay.co.ke port=4443 user="${USER_NAME}" password="${PASSWORD}" profile=default-encryption verify-server-certificate=yes add-default-route=no disabled=no
+/interface list add name=WAN comment="FASTNETPAY WAN interfaces"
+/interface list member add list=WAN interface=ether1 comment="FASTNETPAY bootstrap WAN"
+/ip dhcp-client add interface=ether1 add-default-route=yes use-peer-dns=yes disabled=no comment="FASTNETPAY bootstrap WAN DHCP"
+/ip dns set servers="1.1.1.1,8.8.8.8" allow-remote-requests=yes
+:if ([:len [/interface sstp-client find name="sstp-fastnetpay"]] = 0) do={/interface sstp-client add name="sstp-fastnetpay" connect-to="sstp.fastnetpay.co.ke:4443" user="${USER_NAME}" password="${PASSWORD}" profile="default-encryption" verify-server-certificate=no add-default-route=no disabled=yes comment="FASTNETPAY SSTP management tunnel"}
+/interface sstp-client set [find name="sstp-fastnetpay"] connect-to="sstp.fastnetpay.co.ke:4443"
+/interface sstp-client set [find name="sstp-fastnetpay"] user="${USER_NAME}"
+/interface sstp-client set [find name="sstp-fastnetpay"] password="${PASSWORD}"
+/interface sstp-client set [find name="sstp-fastnetpay"] profile="default-encryption" verify-server-certificate=no
+/interface sstp-client set [find name="sstp-fastnetpay"] add-default-route=no disabled=no comment="FASTNETPAY SSTP management tunnel"
+/ip address add address="${ROUTER_IP}/32" network="10.100.0.1" interface=sstp-fastnetpay comment="FASTNETPAY stable router VPN API IP"
+/ip firewall filter add chain=input src-address=10.100.0.1 action=accept place-before=0 comment="FASTNETPAY accept VPN management input"
+/interface list member add list=LAN interface=sstp-fastnetpay comment="FASTNETPAY VPN management tunnel"
 
 After it connects:
-  ping ${ROUTER_IP}
-  register this router in FASTNETPAY using IP/Host ${ROUTER_IP}
+  From the router, ping 10.100.0.1
+  From the VPS/FASTNETPAY container, test ${ROUTER_IP}:8728
+  Register this router in FASTNETPAY using IP/Host ${ROUTER_IP}
 EOF

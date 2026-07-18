@@ -15,6 +15,7 @@ MikroTik routers at customer sites
 Production guidance:
 
 - Use WireGuard where RouterOS supports it.
+- Use SSTP for RouterOS v6 devices such as RB951, and configure the server with an RSA certificate plus no SSTP SNI `host-name=` enforcement.
 - Give every router a unique tunnel IP.
 - Restrict API/API-SSL to the FASTNETPAY VPN IP only.
 - Keep Winbox/SSH restricted to trusted management IPs.

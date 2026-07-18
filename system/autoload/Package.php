@@ -144,6 +144,8 @@ class Package
         if (class_exists('Tenant')) {
             $query = Tenant::scopeIfTenant($query, 'tbl_user_recharges');
         }
+        $query->order_by_expr("CASE WHEN tbl_user_recharges.status = 'on' THEN 0 ELSE 1 END")
+            ->order_by_desc('tbl_user_recharges.id');
         $b = $query->find_one();
 
         run_hook("recharge_user");
@@ -287,6 +289,7 @@ class Package
                     $b->admin_id = '0';
                 }
                 $b->save();
+                self::enforceSingleActiveRecharge($b, $tenantId);
             }
 
             // insert table transactions
@@ -409,6 +412,7 @@ class Package
                     $d->admin_id = '0';
                 }
                 $d->save();
+                self::enforceSingleActiveRecharge($d, $tenantId);
             }
 
             // insert table transactions
@@ -492,6 +496,37 @@ class Package
             $trx->trx_invoice = $inv;
         }
         return $inv;
+    }
+
+    private static function enforceSingleActiveRecharge($currentRecharge, $tenantId = 0)
+    {
+        if (!$currentRecharge || strtolower((string) $currentRecharge['status']) !== 'on') {
+            return;
+        }
+
+        $customerId = (int) $currentRecharge['customer_id'];
+        $type = (string) $currentRecharge['type'];
+        if ($customerId <= 0 || !in_array(strtolower($type), ['hotspot', 'pppoe'], true)) {
+            return;
+        }
+
+        $query = ORM::for_table('tbl_user_recharges')
+            ->where('status', 'on')
+            ->where('customer_id', $customerId)
+            ->where('type', $type)
+            ->where_not_equal('id', (int) $currentRecharge['id']);
+
+        if (!empty($currentRecharge['routers'])) {
+            $query->where('routers', $currentRecharge['routers']);
+        }
+        if (class_exists('Tenant')) {
+            $query = Tenant::scopeIfTenant($query, 'tbl_user_recharges');
+        }
+
+        foreach ($query->find_many() as $older) {
+            $older->status = 'off';
+            $older->save();
+        }
     }
 
     public static function rechargeBalance($customer, $plan, $gateway, $channel, $note = '')

@@ -33,6 +33,7 @@ class MikrotikHotspot
     {
         $mikrotik = $this->info($plan['routers']);
         $client = $this->getClient($mikrotik['ip_address'], $mikrotik['username'], $mikrotik['password']);
+        $this->add_plan($plan);
 		$isExp = ORM::for_table('tbl_plans')->select("id")->where('plan_expired', $plan['id'])->find_one();
         $this->removeHotspotUser($client, $customer['username']);
 		if ($isExp){
@@ -248,6 +249,9 @@ class MikrotikHotspot
             RouterOS\Query::where('name', $plan['name_plan'])
         );
         $profileID = $client->sendSync($printRequest)->getProperty('.id');
+        if (empty($profileID)) {
+            return;
+        }
         $removeRequest = new RouterOS\Request('/ip/hotspot/user/profile/remove');
         $client->sendSync(
             $removeRequest
@@ -281,6 +285,9 @@ class MikrotikHotspot
             RouterOS\Query::where('name', $username)
         );
         $userID = $client->sendSync($printRequest)->getProperty('.id');
+        if (empty($userID)) {
+            return;
+        }
         $removeRequest = new RouterOS\Request('/ip/hotspot/user/remove');
         $client->sendSync(
             $removeRequest
@@ -400,6 +407,9 @@ class MikrotikHotspot
         $onlineRequest->setArgument('.proplist', '.id');
         $onlineRequest->setQuery(RouterOS\Query::where('user', $username));
         $id = $client->sendSync($onlineRequest)->getProperty('.id');
+        if (empty($id)) {
+            return;
+        }
 
         $removeRequest = new RouterOS\Request('/ip/hotspot/active/remove');
         $removeRequest->setArgument('numbers', $id);

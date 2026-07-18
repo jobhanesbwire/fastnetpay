@@ -9,6 +9,53 @@
 
 class Text
 {
+    public static function runtimeBaseUrl()
+    {
+        $fallback = defined('APP_URL') ? rtrim((string) APP_URL, '/') : '';
+        if (PHP_SAPI === 'cli') {
+            return $fallback;
+        }
+
+        $hostHeader = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
+        if ($hostHeader === '') {
+            return $fallback;
+        }
+
+        $port = '';
+        $host = $hostHeader;
+        if (preg_match('/^\[([a-f0-9:]+)\](?::(\d+))?$/i', $hostHeader, $matches)) {
+            $host = '[' . strtolower($matches[1]) . ']';
+            $port = $matches[2] ?? '';
+        } elseif (strpos($hostHeader, ':') !== false) {
+            [$host, $port] = explode(':', $hostHeader, 2);
+        }
+
+        $host = strtolower(preg_replace('/[^a-z0-9.\-\[\]:]/i', '', $host));
+        $port = preg_replace('/[^0-9]/', '', (string) $port);
+        if ($host === '') {
+            return $fallback;
+        }
+
+        $forwardedProto = strtolower(trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0]));
+        $cfVisitor = (string) ($_SERVER['HTTP_CF_VISITOR'] ?? '');
+        $isHttps = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
+            || (int) ($_SERVER['SERVER_PORT'] ?? 0) === 443
+            || $forwardedProto === 'https'
+            || stripos($cfVisitor, '"scheme":"https"') !== false;
+        $scheme = $isHttps ? 'https' : 'http';
+
+        $portSuffix = '';
+        if ($port !== '' && !(($scheme === 'https' && $port === '443') || ($scheme === 'http' && $port === '80'))) {
+            $portSuffix = ':' . $port;
+        }
+
+        $basePath = '';
+        if ($fallback !== '') {
+            $basePath = rtrim((string) (parse_url($fallback, PHP_URL_PATH) ?: ''), '/');
+        }
+
+        return rtrim($scheme . '://' . $host . $portSuffix . $basePath, '/');
+    }
 
     public static function toHex($string)
     {

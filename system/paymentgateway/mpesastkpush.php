@@ -464,6 +464,11 @@ function mpesastkpush_handle_callback()
         $payment->trx_invoice = $invoice;
         $payment->status = 2;
         $payment->save();
+        $loginOk = mpesastkpush_connect_hotspot_session($payment);
+        $state['hotspot_login_status'] = $loginOk ? 'connected' : 'pending';
+        $state['hotspot_login_attempted_at'] = date('Y-m-d H:i:s');
+        $payment->pg_request = json_encode($state);
+        $payment->save();
         _log('M-Pesa STK Push payment successful for transaction #' . $payment['id'] . ' receipt ' . ($metadata['MpesaReceiptNumber'] ?? ''), 'Payment Gateway', 0);
     } else {
         $state['status_note'] = $resultDesc;
@@ -498,6 +503,108 @@ function mpesastkpush_activate_transaction($payment)
 
     $trx = $payment;
     return Package::rechargeUser($user['id'], $payment['routers'], $payment['plan_id'], $payment['gateway'], 'M-Pesa STK Push', 'M-Pesa STK Push payment');
+}
+
+function mpesastkpush_reconnect_hotspot_payment($router, $code, $phone = '', $mac = '', $ip = '')
+{
+    $code = strtoupper(mpesastkpush_clean_reference($code, 80));
+    if ($code === '') {
+        throw new Exception('Enter your M-Pesa transaction code.');
+    }
+
+    $query = ORM::for_table('tbl_payment_gateway')
+        ->where('gateway', 'mpesastkpush')
+        ->where('status', 2)
+        ->where('routers_id', (int) $router['id'])
+        ->where_like('pg_paid_response', '%' . $code . '%')
+        ->order_by_desc('id');
+
+    if (class_exists('Tenant') && Tenant::hasColumn('tbl_payment_gateway', 'tenant_id')) {
+        $tenantId = (int) (($router['tenant_id'] ?? 0) ?: Tenant::currentId());
+        if ($tenantId > 0) {
+            $query->where('tenant_id', $tenantId);
+        }
+    }
+
+    $payment = $query->find_one();
+    if (!$payment) {
+        throw new Exception('Transaction not found yet. Wait a few seconds or contact support.');
+    }
+
+    $customer = ORM::for_table('tbl_customers')->find_one((int) $payment['user_id']);
+    if (!$customer) {
+        throw new Exception('Payment found, but the linked customer record is missing.');
+    }
+
+    if (!mpesastkpush_active_hotspot_recharge($payment, $customer)) {
+        throw new Exception('Payment found but package has expired. Please buy again.');
+    }
+
+    mpesastkpush_connect_hotspot_session($payment, $customer, $ip, $mac);
+
+    return [
+        'ok' => true,
+        'message' => 'Payment found. Logging you in...',
+        'username' => $customer['username'],
+        'password' => $customer['password'],
+    ];
+}
+
+function mpesastkpush_active_hotspot_recharge($payment, $customer)
+{
+    return ORM::for_table('tbl_user_recharges')
+        ->where('customer_id', (int) $customer['id'])
+        ->where('routers', $payment['routers'])
+        ->where('status', 'on')
+        ->where_raw("UNIX_TIMESTAMP(CONCAT(`expiration`,' ',`time`)) >= UNIX_TIMESTAMP(NOW())")
+        ->find_one();
+}
+
+function mpesastkpush_connect_hotspot_session($payment, $user = null, $ipOverride = '', $macOverride = '')
+{
+    global $DEVICE_PATH;
+
+    $state = mpesastkpush_decode_json($payment['pg_request']);
+    $ip = mpesastkpush_clean_hotspot_value($ipOverride ?: ($state['ip'] ?? ''), 64);
+    $mac = mpesastkpush_clean_hotspot_value($macOverride ?: ($state['mac'] ?? ''), 64);
+    if ($ip === '' || $mac === '') {
+        return false;
+    }
+
+    if (!$user && !empty($payment['user_id'])) {
+        $user = ORM::for_table('tbl_customers')->find_one((int) $payment['user_id']);
+    }
+    if (!$user && !empty($payment['username'])) {
+        $user = ORM::for_table('tbl_customers')->where('username', $payment['username'])->find_one();
+    }
+    if (!$user) {
+        return false;
+    }
+
+    $router = null;
+    if (!empty($payment['routers_id'])) {
+        $router = ORM::for_table('tbl_routers')->find_one((int) $payment['routers_id']);
+    }
+    if (!$router && !empty($payment['routers'])) {
+        $router = ORM::for_table('tbl_routers')->where('name', $payment['routers'])->find_one();
+    }
+    if (!$router) {
+        return false;
+    }
+
+    $devicePath = $DEVICE_PATH . DIRECTORY_SEPARATOR . 'MikrotikHotspot.php';
+    try {
+        if (!file_exists($devicePath)) {
+            throw new Exception('MikrotikHotspot device adapter is missing.');
+        }
+        require_once $devicePath;
+        (new MikrotikHotspot())->connect_customer($user, $ip, $mac, $router['name']);
+        _log('M-Pesa STK Push hotspot session connected for ' . $user['username'] . ' on ' . $router['name'], 'Payment Gateway', 0);
+        return true;
+    } catch (Throwable $e) {
+        _log('M-Pesa STK Push hotspot session login pending for ' . $user['username'] . ': ' . mpesastkpush_safe_error($e->getMessage()), 'Payment Gateway', 0);
+        return false;
+    }
 }
 
 function mpesastkpush_send_stk($payment, $phone, $amount)
@@ -1200,6 +1307,17 @@ function mpesastkpush_clean_reference($value, $maxLength = 12)
 {
     $value = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) $value));
     return substr($value, 0, $maxLength);
+}
+
+function mpesastkpush_clean_hotspot_value($value, $maxLength = 64)
+{
+    return substr(preg_replace('/[^A-Za-z0-9_.: -]+/', '', trim((string) $value)), 0, $maxLength);
+}
+
+function mpesastkpush_safe_error($message)
+{
+    $message = preg_replace('/(password|pass|secret|token)=([^\\s]+)/i', '$1=***', (string) $message);
+    return mpesastkpush_clean_text($message, 220);
 }
 
 function mpesastkpush_clean_text($value, $maxLength = 120)

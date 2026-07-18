@@ -425,16 +425,28 @@ class JoviPay
         }
 
         $prefix = $settings['account_prefix'] ?: 'WIFI_';
-        if (strpos($normalized['account_reference'], $prefix) !== 0) {
-            self::storeIgnored($normalized, $payload, $prefix, $tenantId);
-            self::callbackFailed('Account prefix is not registered for FASTNETPAY.', 200, [
-                'reference' => $normalized['account_reference'],
-                'fastnetpay_status' => 'ignored',
-            ]);
+        if (!self::referenceMatchesPrefix($normalized['account_reference'], $prefix)) {
+            $matched = self::findTransaction($normalized, $tenantId);
+            if ($matched) {
+                $normalized['account_reference'] = (string) $matched['account_reference'];
+            } else {
+                self::storeIgnored($normalized, $payload, $prefix, $tenantId);
+                self::callbackFailed('Account prefix is not registered for FASTNETPAY.', 200, [
+                    'reference' => $normalized['account_reference'],
+                    'fastnetpay_status' => 'ignored',
+                ]);
+            }
         }
 
         $tx = self::findTransaction($normalized, $tenantId);
         if (!$tx) {
+            $direct = self::settleDirectMpesaGateway($normalized, $payload, $tenantId);
+            if ($direct) {
+                self::callbackSuccess($direct['message'], $normalized['account_reference'], [
+                    'fastnetpay_status' => $direct['status'],
+                    'receipt' => $normalized['receipt'],
+                ]);
+            }
             $tx = self::createUnmatchedTransaction($normalized, $payload, $prefix, $tenantId);
         }
 
@@ -510,6 +522,8 @@ class JoviPay
             self::logReconnect($router, $code, $phone, $mac, $customer['username'], 'expired', 'Payment found but package has expired.');
             throw new Exception('Payment found but package has expired. Please buy again.');
         }
+
+        self::connectHotspotSession($router, $customer, $ip ?: $row['ip_address'], $mac ?: $row['mac_address']);
 
         $row->status = 'reconnected';
         $row->updated_at = date('Y-m-d H:i:s');
@@ -956,6 +970,7 @@ class JoviPay
             $tx->activation_status = 'activated';
             $tx->updated_at = date('Y-m-d H:i:s');
             $tx->save();
+            self::connectHotspotSession($router, $customer, $tx['ip_address'], $tx['mac_address']);
             return ['status' => 'already_processed', 'message' => 'Payment was already activated.'];
         }
 
@@ -983,6 +998,8 @@ class JoviPay
         $tx->activation_status = 'activated';
         $tx->updated_at = date('Y-m-d H:i:s');
         $tx->save();
+
+        self::connectHotspotSession($router, $customer, $tx['ip_address'], $tx['mac_address']);
 
         return ['status' => 'success', 'message' => 'Payment confirmed and internet package activated.'];
     }
@@ -1066,14 +1083,17 @@ class JoviPay
 
     private static function findTransaction($normalized, $tenantId = 0)
     {
-        $query = ORM::for_table(self::TX_TABLE)->where('account_reference', $normalized['account_reference']);
-        if (class_exists('Tenant') && Tenant::hasColumn(self::TX_TABLE, 'tenant_id') && $tenantId > 0) {
-            $query->where('tenant_id', (int) $tenantId);
+        if (!empty($normalized['account_reference'])) {
+            $query = ORM::for_table(self::TX_TABLE)->where('account_reference', $normalized['account_reference']);
+            if (class_exists('Tenant') && Tenant::hasColumn(self::TX_TABLE, 'tenant_id') && $tenantId > 0) {
+                $query->where('tenant_id', (int) $tenantId);
+            }
+            $tx = $query->find_one();
+            if ($tx) {
+                return $tx;
+            }
         }
-        $tx = $query->find_one();
-        if ($tx) {
-            return $tx;
-        }
+
         foreach (['checkout_request_id', 'merchant_request_id', 'receipt'] as $field) {
             if (!empty($normalized[$field])) {
                 $column = $field === 'receipt' ? 'mpesa_receipt_number' : $field;
@@ -1087,7 +1107,173 @@ class JoviPay
                 }
             }
         }
+
+        $fallback = self::findRecentPendingTransaction($normalized, $tenantId);
+        if ($fallback) {
+            return $fallback;
+        }
+
         return null;
+    }
+
+    private static function findRecentPendingTransaction($normalized, $tenantId = 0)
+    {
+        $settings = self::settings($tenantId);
+        $prefix = self::cleanPrefix($settings['account_prefix'] ?? 'WIFI_');
+        $reference = self::cleanReference($normalized['account_reference'] ?? '');
+        $referenceCompact = preg_replace('/[^A-Z0-9]/', '', $reference);
+        $prefixCompact = preg_replace('/[^A-Z0-9]/', '', $prefix);
+
+        if ($reference !== '' && $prefixCompact !== '' && strpos($referenceCompact, $prefixCompact) !== 0) {
+            return null;
+        }
+
+        $routerId = self::routerIdFromReference($reference, $prefix);
+        $query = ORM::for_table(self::TX_TABLE)
+            ->where_in('status', ['pending', 'success'])
+            ->where_raw("created_at >= DATE_SUB(NOW(), INTERVAL 6 HOUR)")
+            ->order_by_desc('id');
+
+        if (class_exists('Tenant') && Tenant::hasColumn(self::TX_TABLE, 'tenant_id') && $tenantId > 0) {
+            $query->where('tenant_id', (int) $tenantId);
+        }
+        if (!empty($normalized['phone'])) {
+            $query->where('phone', $normalized['phone']);
+        }
+        if (!empty($normalized['amount'])) {
+            $query->where('amount', self::amount($normalized['amount']));
+        }
+        if ($routerId > 0) {
+            $query->where('router_id', $routerId);
+        }
+
+        return $query->find_one();
+    }
+
+    private static function settleDirectMpesaGateway($normalized, $payload, $tenantId = 0)
+    {
+        if (empty($normalized['paid'])) {
+            return null;
+        }
+
+        $payment = self::findDirectMpesaPayment($normalized, $tenantId);
+        if (!$payment) {
+            return null;
+        }
+
+        global $PAYMENTGATEWAY_PATH;
+        $gatewayPath = $PAYMENTGATEWAY_PATH . DIRECTORY_SEPARATOR . 'mpesastkpush.php';
+        if (!file_exists($gatewayPath)) {
+            return null;
+        }
+        require_once $gatewayPath;
+
+        $safeResponse = [
+            'ResultCode' => 0,
+            'ResultDesc' => 'Jovi-Pay C2B confirmation received.',
+            'MpesaReceiptNumber' => $normalized['receipt'],
+            'Amount' => $normalized['amount'],
+            'PhoneNumber' => $normalized['phone'],
+            'TransactionDate' => $normalized['transaction_date'],
+            'AccountReference' => $normalized['account_reference'],
+        ];
+
+        if ((int) $payment['status'] !== 2) {
+            $invoice = mpesastkpush_activate_transaction($payment);
+            if (!$invoice) {
+                $state = json_decode($payment['pg_request'], true) ?: [];
+                $state['status_note'] = 'Jovi-Pay C2B payment received, package activation pending';
+                $state['jovipay_callback_received_at'] = date('Y-m-d H:i:s');
+                $payment->pg_request = json_encode($state);
+                $payment->pg_paid_response = json_encode(self::safePayload($payload));
+                $payment->save();
+                _log('Jovi-Pay C2B received but direct M-Pesa activation failed for transaction #' . $payment['id'], 'Payment Gateway', 0);
+                return ['status' => 'activation_pending', 'message' => 'Payment received, but package activation is pending.'];
+            }
+
+            $payment->payment_method = 'M-Pesa';
+            $payment->payment_channel = 'Jovi-Pay C2B Forward';
+            $payment->paid_date = date('Y-m-d H:i:s');
+            $payment->trx_invoice = $invoice;
+            $payment->status = 2;
+        }
+
+        $state = json_decode($payment['pg_request'], true) ?: [];
+        $state['status_note'] = 'Jovi-Pay C2B payment confirmed and package activated';
+        $state['jovipay_callback_received_at'] = date('Y-m-d H:i:s');
+        $state['jovipay_account_reference'] = $normalized['account_reference'];
+        $state['jovipay_receipt'] = $normalized['receipt'];
+        $payment->pg_request = json_encode($state);
+        $payment->pg_paid_response = json_encode($safeResponse);
+        $payment->save();
+
+        $customer = ORM::for_table('tbl_customers')->find_one((int) $payment['user_id']);
+        $loginOk = mpesastkpush_connect_hotspot_session($payment, $customer);
+        $state['hotspot_login_status'] = $loginOk ? 'connected' : 'pending';
+        $state['hotspot_login_attempted_at'] = date('Y-m-d H:i:s');
+        $payment->pg_request = json_encode($state);
+        $payment->save();
+
+        return ['status' => 'direct_mpesastkpush_settled', 'message' => 'Payment settled and package activated.'];
+    }
+
+    private static function findDirectMpesaPayment($normalized, $tenantId = 0)
+    {
+        $reference = self::cleanReference($normalized['account_reference'] ?? '');
+        $paymentId = self::directPaymentIdFromReference($reference);
+        if ($paymentId > 0) {
+            $query = ORM::for_table('tbl_payment_gateway')
+                ->where('id', $paymentId)
+                ->where('gateway', 'mpesastkpush')
+                ->where_in('status', [1, 2]);
+            if (class_exists('Tenant') && Tenant::hasColumn('tbl_payment_gateway', 'tenant_id') && $tenantId > 0) {
+                $query->where('tenant_id', (int) $tenantId);
+            }
+            $payment = $query->find_one();
+            if ($payment) {
+                return $payment;
+            }
+        }
+
+        $query = ORM::for_table('tbl_payment_gateway')
+            ->where('gateway', 'mpesastkpush')
+            ->where_in('status', [1, 2])
+            ->where_raw("created_date >= DATE_SUB(NOW(), INTERVAL 6 HOUR)")
+            ->order_by_desc('id');
+        if (!empty($normalized['amount'])) {
+            $query->where('price', self::amount($normalized['amount']));
+        }
+        if (!empty($normalized['phone'])) {
+            $query->where_like('pg_request', '%"phone":"' . $normalized['phone'] . '"%');
+        }
+        if (class_exists('Tenant') && Tenant::hasColumn('tbl_payment_gateway', 'tenant_id') && $tenantId > 0) {
+            $query->where('tenant_id', (int) $tenantId);
+        }
+
+        return $query->find_one();
+    }
+
+    private static function directPaymentIdFromReference($reference)
+    {
+        $reference = self::cleanReference($reference);
+        if ($reference === '') {
+            return 0;
+        }
+        $prefixes = ['FASTNETPAY', 'WIFI', 'FNP'];
+        try {
+            $configured = ORM::for_table('tbl_appconfig')->where('setting', 'mpesastkpush_account_prefix')->find_one();
+            if ($configured && trim((string) $configured['value']) !== '') {
+                array_unshift($prefixes, strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) $configured['value'])));
+            }
+        } catch (Throwable $ignored) {
+        }
+        foreach (array_unique(array_filter($prefixes)) as $prefix) {
+            if (strpos($reference, $prefix) === 0) {
+                $tail = substr($reference, strlen($prefix));
+                return ctype_digit($tail) ? (int) $tail : 0;
+            }
+        }
+        return 0;
     }
 
     private static function createUnmatchedTransaction($normalized, $payload, $prefix, $tenantId = 0)
@@ -1170,13 +1356,10 @@ class JoviPay
     private static function hotspotCustomer($router, $phone, $mac, $ip)
     {
         $tenantId = class_exists('Tenant') ? (int) ($router['tenant_id'] ?: Tenant::currentId()) : 0;
-        $seed = $router['id'] . '|' . $mac . '|' . $ip . '|' . $phone;
-        $username = 'hs_' . substr(sha1($seed), 0, 16);
-        $query = ORM::for_table('tbl_customers')->where('username', $username);
-        if (class_exists('Tenant') && Tenant::hasColumn('tbl_customers', 'tenant_id')) {
-            $query->where('tenant_id', $tenantId);
-        }
-        $customer = $query->find_one();
+        $macKey = self::macKey($mac);
+        $seed = $router['id'] . '|' . ($macKey ?: $mac) . '|' . $phone;
+        $username = self::hotspotUsername($router, $mac, $ip);
+        $customer = self::findHotspotCustomerByDevice($router, $mac, $phone, $ip);
         if (!$customer) {
             $customer = ORM::for_table('tbl_customers')->create();
             if (class_exists('Tenant')) {
@@ -1198,10 +1381,153 @@ class JoviPay
             $customer->status = 'Active';
             $customer->created_by = 0;
         }
+        self::normalizeHotspotCustomerIdentity($customer, $router, $username, $mac, $phone);
         $customer->phonenumber = $phone;
+        if ($macKey !== '') {
+            $customer->address = 'MikroTik hotspot ' . $router['name'] . ' device ' . $mac;
+        }
         $customer->last_login = date('Y-m-d H:i:s');
         $customer->save();
         return $customer;
+    }
+
+    private static function hotspotUsername($router, $mac, $ip = '')
+    {
+        $macKey = self::macKey($mac);
+        if ($macKey !== '') {
+            return $macKey;
+        }
+        return 'HS' . strtoupper(substr(sha1((int) $router['id'] . '|' . $ip), 0, 14));
+    }
+
+    private static function macDisplay($mac)
+    {
+        $macKey = self::macKey($mac);
+        if ($macKey === '') {
+            return self::clean($mac, 64);
+        }
+        return implode(':', str_split($macKey, 2));
+    }
+
+    private static function findHotspotCustomerByDevice($router, $mac, $phone = '', $ip = '')
+    {
+        $tenantId = class_exists('Tenant') ? (int) ($router['tenant_id'] ?: Tenant::currentId()) : 0;
+        $username = self::hotspotUsername($router, $mac, $ip);
+        $macKey = self::macKey($mac);
+        $formattedMac = self::macDisplay($mac);
+        $oldUsername = $macKey !== '' ? 'hs_r' . (int) $router['id'] . '_' . strtolower(substr($macKey, -12)) : '';
+        $candidates = array_values(array_unique(array_filter([$username, $oldUsername])));
+
+        if ($candidates) {
+            $query = ORM::for_table('tbl_customers')->where_in('username', $candidates);
+            if (class_exists('Tenant') && Tenant::hasColumn('tbl_customers', 'tenant_id')) {
+                $query->where('tenant_id', $tenantId);
+            }
+            $customer = $query->order_by_desc('id')->find_one();
+            if ($customer) {
+                return $customer;
+            }
+        }
+
+        if ($macKey !== '') {
+            $query = ORM::for_table('tbl_customers')
+                ->where_raw('(fullname LIKE ? OR address LIKE ?)', [$formattedMac . '-%', '%device ' . $formattedMac . '%'])
+                ->order_by_desc('id');
+            if (class_exists('Tenant') && Tenant::hasColumn('tbl_customers', 'tenant_id')) {
+                $query->where('tenant_id', $tenantId);
+            }
+            $customer = $query->find_one();
+            if ($customer) {
+                return $customer;
+            }
+
+            $payment = ORM::for_table('tbl_payment_gateway')
+                ->where_raw('(pg_request LIKE ? OR pg_request LIKE ?)', ['%"mac":"' . $formattedMac . '"%', '%"mac":"' . $macKey . '"%'])
+                ->where_gt('user_id', 0)
+                ->order_by_desc('id')
+                ->find_one();
+            if ($payment) {
+                $customer = ORM::for_table('tbl_customers')->find_one((int) $payment['user_id']);
+                if ($customer) {
+                    return $customer;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static function normalizeHotspotCustomerIdentity($customer, $router, $username, $mac, $phone)
+    {
+        $tenantId = class_exists('Tenant') ? (int) ($router['tenant_id'] ?: Tenant::currentId()) : 0;
+        $formattedMac = self::macDisplay($mac);
+        $fullname = ($formattedMac !== '' ? $formattedMac : $username) . '-' . ($phone ?: 'unknown');
+
+        if ($username !== '' && $customer['username'] !== $username) {
+            $query = ORM::for_table('tbl_customers')->where('username', $username);
+            if (class_exists('Tenant') && Tenant::hasColumn('tbl_customers', 'tenant_id')) {
+                $query->where('tenant_id', $tenantId);
+            }
+            $existing = $query->find_one();
+            if (!$existing || (int) $existing['id'] === (int) $customer['id']) {
+                $oldUsername = (string) $customer['username'];
+                $customer->username = $username;
+                self::updateHotspotUsernameReferences($customer, $oldUsername, $username);
+            }
+        }
+
+        $customer->fullname = substr($fullname, 0, 190);
+        $customer->email = strtolower(preg_replace('/[^A-Za-z0-9_.-]/', '', $username)) . '@hotspot.local';
+    }
+
+    private static function updateHotspotUsernameReferences($customer, $oldUsername, $newUsername)
+    {
+        if ($oldUsername === '' || $oldUsername === $newUsername) {
+            return;
+        }
+        foreach ([
+            'tbl_user_recharges' => 'customer_id',
+            'tbl_payment_gateway' => 'user_id',
+            'tbl_transactions' => 'user_id',
+            self::TX_TABLE => 'customer_id',
+        ] as $table => $idColumn) {
+            try {
+                if (class_exists('Tenant') && !Tenant::hasColumn($table, 'username')) {
+                    continue;
+                }
+                $rows = ORM::for_table($table)->where($idColumn, (int) $customer['id'])->find_many();
+                foreach ($rows as $row) {
+                    $row->username = $newUsername;
+                    $row->save();
+                }
+            } catch (Throwable $ignored) {
+            }
+        }
+    }
+
+    private static function connectHotspotSession($router, $customer, $ip, $mac)
+    {
+        global $DEVICE_PATH;
+
+        $ip = self::clean($ip, 64);
+        $mac = self::clean($mac, 64);
+        if ($ip === '' || $mac === '' || !$router || !$customer) {
+            return false;
+        }
+
+        $devicePath = $DEVICE_PATH . DIRECTORY_SEPARATOR . 'MikrotikHotspot.php';
+        try {
+            if (!file_exists($devicePath)) {
+                throw new Exception('MikrotikHotspot device adapter is missing.');
+            }
+            require_once $devicePath;
+            (new MikrotikHotspot())->connect_customer($customer, $ip, $mac, $router['name']);
+            _log('Jovi-Pay hotspot session connected for ' . $customer['username'] . ' on ' . $router['name'], 'Payment Gateway', 0);
+            return true;
+        } catch (Throwable $e) {
+            _log('Jovi-Pay hotspot session login pending for ' . $customer['username'] . ': ' . self::safeError($e->getMessage()), 'Payment Gateway', 0);
+            return false;
+        }
     }
 
     private static function normalizeCallback($payload)
@@ -1356,8 +1682,50 @@ class JoviPay
 
     private static function accountReference($prefix, $routerId, $planId, $mac, $ip)
     {
-        $session = substr(sha1($mac . '|' . $ip . '|' . microtime(true)), 0, 10);
-        return self::cleanReference($prefix . $routerId . '_' . $planId . '_' . $session . '_' . time());
+        $macKey = self::macKey($mac);
+        $device = $macKey !== '' ? substr($macKey, -8) : strtoupper(substr(sha1($ip), 0, 8));
+        $session = strtoupper(substr(sha1($mac . '|' . $ip . '|' . microtime(true)), 0, 6));
+        return self::cleanReference($prefix . (int) $routerId . '_' . $device . '_' . (int) $planId . '_' . $session);
+    }
+
+    private static function routerIdFromReference($reference, $prefix)
+    {
+        $reference = self::cleanReference($reference);
+        if ($reference === '') {
+            return 0;
+        }
+        $prefix = self::cleanPrefix($prefix);
+        $prefixes = array_unique([$prefix, rtrim($prefix, '_'), preg_replace('/[^A-Z0-9]/', '', $prefix)]);
+        foreach ($prefixes as $candidate) {
+            if ($candidate !== '' && strpos($reference, $candidate) === 0) {
+                $tail = substr($reference, strlen($candidate));
+                if (preg_match('/^_?([0-9]+)/', $tail, $match)) {
+                    return (int) $match[1];
+                }
+            }
+        }
+        return 0;
+    }
+
+    private static function referenceMatchesPrefix($reference, $prefix)
+    {
+        $reference = self::cleanReference($reference);
+        $prefix = self::cleanPrefix($prefix);
+        if ($reference === '') {
+            return false;
+        }
+        if (strpos($reference, $prefix) === 0 || strpos($reference, rtrim($prefix, '_')) === 0) {
+            return true;
+        }
+        $referenceCompact = preg_replace('/[^A-Z0-9]/', '', $reference);
+        $prefixCompact = preg_replace('/[^A-Z0-9]/', '', $prefix);
+        return $prefixCompact !== '' && strpos($referenceCompact, $prefixCompact) === 0;
+    }
+
+    private static function macKey($mac)
+    {
+        $mac = strtoupper(preg_replace('/[^A-F0-9]/i', '', (string) $mac));
+        return strlen($mac) >= 10 ? substr($mac, -12) : '';
     }
 
     private static function endpointUrl($base, $endpoint)

@@ -131,7 +131,7 @@ class ExpiryWorker
         ];
     }
 
-    private static function disconnectRecharge($runId, $recharge, $demo = false)
+    public static function disconnectRecharge($runId, $recharge, $demo = false)
     {
         global $DEVICE_PATH;
         $customer = ORM::for_table('tbl_customers')->where('id', $recharge['customer_id'])->find_one();

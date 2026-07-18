@@ -5,16 +5,13 @@
     }
 
     var form = document.getElementById('fnpProvisionForm');
-    var baseUrl = root.getAttribute('data-base-url') || '';
+    var baseUrl = normalizeBaseUrl(root.getAttribute('data-base-url') || '');
     var routerId = root.getAttribute('data-router-id') || '0';
     var buttons = Array.prototype.slice.call(document.querySelectorAll('.fnp-provision-step-button'));
     var panels = Array.prototype.slice.call(document.querySelectorAll('.fnp-provision-step-panel'));
     var currentIndex = 0;
     var latestScript = '';
-
-    function route(name) {
-        return baseUrl + name + '/' + routerId;
-    }
+    var latestBootstrap = '';
 
     function escapeHtml(value) {
         return String(value || '').replace(/[&<>"']/g, function (char) {
@@ -26,6 +23,54 @@
                 "'": '&#039;'
             }[char];
         });
+    }
+
+    function normalizeBaseUrl(value) {
+        var fallback = window.location.origin + window.location.pathname + '?_route=';
+        if (!value) {
+            return fallback;
+        }
+        try {
+            var parsed = new URL(value, window.location.href);
+            if (parsed.origin !== window.location.origin) {
+                return fallback;
+            }
+            return parsed.href;
+        } catch (error) {
+            return value;
+        }
+    }
+
+    function route(name) {
+        return baseUrl + name + '/' + routerId;
+    }
+
+    function htmlTitle(text) {
+        var match = String(text || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        return match ? match[1].replace(/\s+/g, ' ').trim() : '';
+    }
+
+    function readableNonJsonError(response, text, url) {
+        var title = htmlTitle(text);
+        var target = '';
+        try {
+            target = new URL(response.url || url, window.location.href).pathname;
+        } catch (error) {
+            target = url;
+        }
+        if (response.status === 401 || /login/i.test(title + ' ' + target)) {
+            return 'Your admin session expired while the wizard was running. Log in again, reopen the wizard, and rerun the last step.';
+        }
+        if (/cloudflare|bad gateway|502/i.test(title + ' ' + text)) {
+            return 'The live server returned a gateway/proxy error instead of provisioning JSON. Refresh the page and check production app logs.';
+        }
+        if (/PHPNuxBill Crash|FASTNETPAY Crash|fatal error|exception/i.test(title + ' ' + text)) {
+            return 'FASTNETPAY returned a crash page instead of provisioning JSON. Open provisioning logs or app logs for the exact PHP error.';
+        }
+        return 'FASTNETPAY returned an HTML page instead of provisioning JSON' +
+            (response.status ? ' (HTTP ' + response.status + ')' : '') +
+            (title ? ': ' + title : '.') +
+            ' Refresh the wizard and try again.';
     }
 
     function setBusy(button, busy, label) {
@@ -57,16 +102,30 @@
         });
     }
 
-    function request(url) {
+    function request(url, extra) {
+        var body = new FormData(form);
+        if (extra) {
+            Object.keys(extra).forEach(function (key) {
+                body.append(key, extra[key]);
+            });
+        }
         return fetch(url, {
             method: 'POST',
-            body: new FormData(form),
+            body: body,
             credentials: 'same-origin',
+            cache: 'no-store',
             headers: {
+                'Accept': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest'
             }
         }).then(function (response) {
-            return response.json().then(function (json) {
+            return response.text().then(function (body) {
+                var json;
+                try {
+                    json = body ? JSON.parse(body) : {};
+                } catch (error) {
+                    throw new Error(readableNonJsonError(response, body, url));
+                }
                 if (!response.ok || json.ok === false) {
                     throw new Error(json.message || 'Request failed');
                 }
@@ -151,13 +210,32 @@
             '</ul></div></div>';
     }
 
+    function renderBootstrap(data) {
+        var result = document.getElementById('fnpProvisionBootstrapResult');
+        var script = document.getElementById('fnpProvisionBootstrapScript');
+        if (!result || !script) {
+            return;
+        }
+        latestBootstrap = data.script || '';
+        script.textContent = latestBootstrap || 'No bootstrap script generated.';
+        var ok = data.ok !== false;
+        result.innerHTML = '<div class="fnp-provision-alert ' + (ok ? 'is-ready' : 'is-warning') + '">' +
+            '<i class="fa ' + (ok ? 'fa-check-circle' : 'fa-exclamation-triangle') + '"></i><div><strong>' +
+            (ok ? 'Bootstrap ready' : 'Bootstrap needs attention') + '</strong><br>' +
+            escapeHtml(data.message || '') +
+            (data.router_vpn_ip ? '<br><small>After paste, test FASTNETPAY connection to ' + escapeHtml(data.router_vpn_ip) + ':8728.</small>' : '') +
+            '</div></div>';
+    }
+
     function renderRun(data) {
         var target = document.getElementById('fnpProvisionApplyResult');
         if (!target) {
             return;
         }
-        var html = '<div class="fnp-provision-run-card ' + (data.ok ? 'is-success' : 'is-error') + '">';
-        html += '<h4>' + (data.ok ? 'Provisioning completed' : 'Provisioning stopped') + '</h4>';
+        var running = data.status === 'queued' || data.status === 'running' || data.async === true;
+        var failed = data.status === 'failed' || data.ok === false;
+        var html = '<div class="fnp-provision-run-card ' + (failed ? 'is-error' : 'is-success') + '">';
+        html += '<h4>' + (running ? 'Provisioning is running' : (failed ? 'Provisioning stopped' : 'Provisioning completed')) + '</h4>';
         html += '<p>Run #' + escapeHtml(data.run_id || '') + (data.backup_file ? ' · Backup: ' + escapeHtml(data.backup_file) : '') + '</p>';
         html += '<div class="fnp-provision-run-steps">';
         (data.steps || []).forEach(function (step) {
@@ -168,6 +246,32 @@
         if (data.final_result) {
             renderFinal(data.final_result);
         }
+    }
+
+    function pollRun(runId, attempt) {
+        attempt = attempt || 0;
+        request(route('routers/provision-status'), { run_id: runId || '' }).then(function (data) {
+            renderRun(data);
+            if (data.final_result) {
+                renderFinal(data.final_result);
+            }
+            if (data.status === 'queued' || data.status === 'running' || data.async === true) {
+                setTimeout(function () {
+                    pollRun(data.run_id || runId, attempt + 1);
+                }, attempt < 6 ? 3000 : 6000);
+                return;
+            }
+            setBusy(document.getElementById('fnpProvisionRun'), false);
+            activate('step-final');
+        }).catch(function (error) {
+            renderRun({
+                ok: false,
+                run_id: runId || '',
+                status: 'failed',
+                steps: [{ name: 'Provisioning status', status: 'failed', message: error.message }]
+            });
+            setBusy(document.getElementById('fnpProvisionRun'), false);
+        });
     }
 
     function renderPortalRefresh(data) {
@@ -242,10 +346,48 @@
             request(route('routers/provision-detect')).then(function (data) {
                 renderDetect(data);
             }).catch(function (error) {
-                target.innerHTML = '<div class="fnp-provision-detect-card is-error"><strong><i class="fa fa-times-circle"></i> Connection failed</strong><span>' + escapeHtml(error.message) + '</span></div>';
+                var hint = /No route to host|timed out|TCP probe failed|10\.100\./i.test(error.message)
+                    ? '<small>For a reset remote router, generate the Reset Router Bootstrap, paste it in Winbox Terminal, wait for SSTP, then test again.</small>'
+                    : '';
+                target.innerHTML = '<div class="fnp-provision-detect-card is-error"><strong><i class="fa fa-times-circle"></i> Connection failed</strong><span>' + escapeHtml(error.message) + '</span>' + hint + '</div>';
             }).finally(function () {
                 setBusy(detect, false);
             });
+        });
+    }
+
+    var bootstrap = document.getElementById('fnpProvisionBootstrap');
+    if (bootstrap) {
+        bootstrap.addEventListener('click', function () {
+            setBusy(bootstrap, true, 'Generating');
+            request(route('routers/provision-bootstrap')).then(function (data) {
+                renderBootstrap(data);
+            }).catch(function (error) {
+                renderBootstrap({ ok: false, message: error.message, script: '' });
+            }).finally(function () {
+                setBusy(bootstrap, false);
+            });
+        });
+    }
+
+    var bootstrapCopy = document.getElementById('fnpProvisionBootstrapCopy');
+    if (bootstrapCopy) {
+        bootstrapCopy.addEventListener('click', function () {
+            var script = latestBootstrap || document.getElementById('fnpProvisionBootstrapScript').textContent || '';
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(script);
+            } else {
+                var temp = document.createElement('textarea');
+                temp.value = script;
+                document.body.appendChild(temp);
+                temp.select();
+                document.execCommand('copy');
+                document.body.removeChild(temp);
+            }
+            bootstrapCopy.innerHTML = '<i class="fa fa-check"></i> Copied';
+            setTimeout(function () {
+                bootstrapCopy.innerHTML = '<i class="fa fa-copy"></i> Copy Bootstrap';
+            }, 1400);
         });
     }
 
@@ -308,13 +450,25 @@
                 return;
             }
             setBusy(run, true, 'Applying');
+            var asyncStarted = false;
             request(route('routers/provision-run')).then(function (data) {
                 renderRun(data);
-                activate('step-final');
+                if (data.status === 'queued' || data.status === 'running' || data.async === true) {
+                    asyncStarted = true;
+                    pollRun(data.run_id, 0);
+                } else {
+                    activate('step-final');
+                }
             }).catch(function (error) {
-                renderRun({ ok: false, run_id: '', steps: [{ name: 'Provisioning', status: 'failed', message: error.message }] });
+                asyncStarted = true;
+                renderRun({ ok: true, async: true, status: 'running', run_id: '', steps: [{ name: 'Provisioning', status: 'running', message: error.message + ' Checking latest run status...' }] });
+                setTimeout(function () {
+                    pollRun('', 0);
+                }, 3000);
             }).finally(function () {
-                setBusy(run, false);
+                if (!asyncStarted) {
+                    setBusy(run, false);
+                }
             });
         });
     }
