@@ -26,6 +26,7 @@ jobs:
     env:
       REQUESTED_IMAGE_TAG: ${{ inputs.image_tag }}
       PORTAINER_WEBHOOK_URL: ${{ secrets.PRODUCTION_PORTAINER_WEBHOOK_URL }}
+      PRODUCTION_HEALTH_URL: ${{ secrets.PRODUCTION_HEALTH_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -62,9 +63,7 @@ jobs:
         run: curl -fsS -X POST "$PORTAINER_WEBHOOK_URL"
 
       - name: Production health check
-        if: ${{ secrets.PRODUCTION_HEALTH_URL != '' }}
-        env:
-          PRODUCTION_HEALTH_URL: ${{ secrets.PRODUCTION_HEALTH_URL }}
+        if: ${{ env.PRODUCTION_HEALTH_URL != '' }}
         run: |
           for i in $(seq 1 40); do
             if curl -fsS "$PRODUCTION_HEALTH_URL" >/tmp/fnp-health.json; then

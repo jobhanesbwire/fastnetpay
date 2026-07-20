@@ -21,6 +21,7 @@ jobs:
     env:
       IMAGE_TAG: staging-${{ github.sha }}
       PORTAINER_WEBHOOK_URL: ${{ secrets.STAGING_PORTAINER_WEBHOOK_URL }}
+      STAGING_HEALTH_URL: ${{ secrets.STAGING_HEALTH_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,9 +48,7 @@ jobs:
         run: curl -fsS -X POST "$PORTAINER_WEBHOOK_URL"
 
       - name: Staging health check
-        if: ${{ secrets.STAGING_HEALTH_URL != '' }}
-        env:
-          STAGING_HEALTH_URL: ${{ secrets.STAGING_HEALTH_URL }}
+        if: ${{ env.STAGING_HEALTH_URL != '' }}
         run: |
           for i in $(seq 1 30); do
             if curl -fsS "$STAGING_HEALTH_URL" >/tmp/fnp-health.json; then
