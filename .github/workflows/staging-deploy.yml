@@ -1,0 +1,62 @@
+name: FASTNETPAY Staging Deploy
+
+on:
+  push:
+    branches:
+      - staging
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: fastnetpay-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: staging
+    env:
+      IMAGE_TAG: staging-${{ github.sha }}
+      PORTAINER_WEBHOOK_URL: ${{ secrets.STAGING_PORTAINER_WEBHOOK_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push staging image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.prod
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/fastnetpay:${{ env.IMAGE_TAG }}
+            ghcr.io/${{ github.repository_owner }}/fastnetpay:${{ github.sha }}
+
+      - name: Trigger Portainer staging webhook
+        if: ${{ env.PORTAINER_WEBHOOK_URL != '' }}
+        run: curl -fsS -X POST "$PORTAINER_WEBHOOK_URL"
+
+      - name: Staging health check
+        if: ${{ secrets.STAGING_HEALTH_URL != '' }}
+        env:
+          STAGING_HEALTH_URL: ${{ secrets.STAGING_HEALTH_URL }}
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS "$STAGING_HEALTH_URL" >/tmp/fnp-health.json; then
+              cat /tmp/fnp-health.json
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Staging health check failed"
+          exit 1

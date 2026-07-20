@@ -1,0 +1,77 @@
+name: FASTNETPAY Production Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Immutable image tag to deploy, usually staging-<commit-sha> after staging validation"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: fastnetpay-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: production
+    env:
+      REQUESTED_IMAGE_TAG: ${{ inputs.image_tag }}
+      PORTAINER_WEBHOOK_URL: ${{ secrets.PRODUCTION_PORTAINER_WEBHOOK_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build immutable production image when no promoted tag is supplied
+        if: ${{ env.REQUESTED_IMAGE_TAG == '' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.prod
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/fastnetpay:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/fastnetpay:prod-${{ github.sha }}
+
+      - name: Record production release metadata
+        run: |
+          {
+            echo "commit=${GITHUB_SHA}"
+            echo "image_tag=${REQUESTED_IMAGE_TAG:-prod-${GITHUB_SHA}}"
+            echo "deployed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > fastnetpay-release.txt
+          cat fastnetpay-release.txt
+
+      - name: Trigger Portainer production webhook
+        if: ${{ env.PORTAINER_WEBHOOK_URL != '' }}
+        run: curl -fsS -X POST "$PORTAINER_WEBHOOK_URL"
+
+      - name: Production health check
+        if: ${{ secrets.PRODUCTION_HEALTH_URL != '' }}
+        env:
+          PRODUCTION_HEALTH_URL: ${{ secrets.PRODUCTION_HEALTH_URL }}
+        run: |
+          for i in $(seq 1 40); do
+            if curl -fsS "$PRODUCTION_HEALTH_URL" >/tmp/fnp-health.json; then
+              cat /tmp/fnp-health.json
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Production health check failed. Roll back through Portainer to the previous image tag."
+          exit 1

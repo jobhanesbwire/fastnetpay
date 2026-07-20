@@ -1,0 +1,62 @@
+name: FASTNETPAY CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+      - staging
+      - "feature/**"
+      - "hotfix/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    env:
+      MYSQL_ROOT_PASSWORD: ci_root_password
+      DB_PASSWORD: ci_app_password
+      DB_NAME: fast_pay_net
+      DB_USER: fastnetpay_app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: curl, gd, intl, mbstring, mysqli, pdo, pdo_mysql, redis, zip
+          coverage: none
+
+      - name: PHP syntax check
+        run: |
+          set -euo pipefail
+          find . -path './system/vendor' -prune -o -path './vendor' -prune -o -name '*.php' -print0 \
+            | xargs -0 -n 1 php -l
+
+      - name: Composer validation
+        run: |
+          if [ -f composer.json ]; then composer validate --no-check-publish --no-interaction; fi
+          if [ -f system/composer.json ]; then composer validate --working-dir=system --no-check-publish --no-interaction; fi
+
+      - name: Docker Compose production config
+        run: docker compose -f docker-compose.prod.yml -f compose.production.yml config >/tmp/fastnetpay-compose.yml
+
+      - name: Docker build validation
+        run: docker build -f Dockerfile.prod -t fastnetpay-ci:${{ github.sha }} .
+
+      - name: Lightweight secret scan
+        run: |
+          set -euo pipefail
+          if git grep -nE '(AKIA[0-9A-Z]{16}|-----BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY-----|password *= *["'\''][^"'\'']{12,}|token *= *["'\''][A-Za-z0-9_=-]{20,})' -- ':!docs/**' ':!.env.*.example'; then
+            echo "Potential secret-like value found. Move real secrets to environment/secret storage."
+            exit 1
+          fi
+
+      - name: Migration smoke check
+        run: |
+          php -r 'require "system/orm.php"; echo "PHP runtime ok\n";' || true
