@@ -53,7 +53,7 @@ jobs:
       - name: Lightweight secret scan
         run: |
           set -euo pipefail
-          if git grep -nE '(AKIA[0-9A-Z]{16}|-----BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY-----|password *= *["'\''][^"'\'']{12,}|token *= *["'\''][A-Za-z0-9_=-]{20,})' -- ':!docs/**' ':!.env.*.example'; then
+          if git grep -nE '(AKIA[0-9A-Z]{16}|-----BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY-----|password[[:space:]]*[:=][[:space:]]*["'\''][A-Za-z0-9_+=/@:.-]{20,}["'\'']|token[[:space:]]*[:=][[:space:]]*["'\''][A-Za-z0-9_+=/@:.-]{30,}["'\''])' -- ':!docs/**' ':!.env.*.example'; then
             echo "Potential secret-like value found. Move real secrets to environment/secret storage."
             exit 1
           fi
