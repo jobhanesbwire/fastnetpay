@@ -31,6 +31,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate production deployment secrets
+        run: |
+          if [ -z "$PORTAINER_WEBHOOK_URL" ]; then
+            echo "::error::PRODUCTION_PORTAINER_WEBHOOK_URL is required for production deployment."
+            exit 1
+          fi
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -59,7 +66,6 @@ jobs:
           cat fastnetpay-release.txt
 
       - name: Trigger Portainer production webhook
-        if: ${{ env.PORTAINER_WEBHOOK_URL != '' }}
         run: curl -fsS -X POST "$PORTAINER_WEBHOOK_URL"
 
       - name: Production health check
