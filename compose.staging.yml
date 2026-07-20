@@ -1,0 +1,60 @@
+# Staging override for docker-compose.prod.yml:
+# FASTNETPAY_ENV_FILE=.env.staging docker compose -f docker-compose.prod.yml -f compose.staging.yml up -d --build
+#
+# Keep staging isolated from production: different project name, env file,
+# database, Redis namespace, volumes, domains, payment secrets and router/VPN secrets.
+
+name: fastnetpay_staging
+
+services:
+  fastnetpay_db:
+    container_name: fastnetpay_staging_db
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-fastnetpay_staging}
+      MYSQL_USER: ${DB_USER:-fastnetpay_staging}
+    volumes:
+      - fastnetpay_staging_db_data:/var/lib/mysql
+
+  fastnetpay_redis:
+    container_name: fastnetpay_staging_redis
+    volumes:
+      - fastnetpay_staging_redis_data:/data
+
+  fastnetpay_app:
+    container_name: fastnetpay_staging_app
+    env_file:
+      - ${FASTNETPAY_ENV_FILE:-.env.staging}
+    environment:
+      APP_STAGE: Staging
+      APP_ENV: staging
+      APP_URL: ${APP_URL:-https://staging.fastnetpay.co.ke}
+      DB_NAME: ${DB_NAME:-fastnetpay_staging}
+      DB_USER: ${DB_USER:-fastnetpay_staging}
+      SESSION_NAME: ${SESSION_NAME:-FNP_STAGING_SESSION}
+      SESSION_HANDLER: ${SESSION_HANDLER:-redis}
+      SESSION_REDIS_DATABASE: ${SESSION_REDIS_DATABASE:-1}
+      SESSION_REDIS_PREFIX: ${SESSION_REDIS_PREFIX:-fnp_staging_sess:}
+
+  fastnetpay_scheduler:
+    container_name: fastnetpay_staging_scheduler
+    env_file:
+      - ${FASTNETPAY_ENV_FILE:-.env.staging}
+    environment:
+      APP_STAGE: Staging
+      APP_ENV: staging
+      DB_NAME: ${DB_NAME:-fastnetpay_staging}
+      DB_USER: ${DB_USER:-fastnetpay_staging}
+      SESSION_NAME: ${SESSION_NAME:-FNP_STAGING_SESSION}
+      SESSION_HANDLER: ${SESSION_HANDLER:-redis}
+      SESSION_REDIS_DATABASE: ${SESSION_REDIS_DATABASE:-1}
+      SESSION_REDIS_PREFIX: ${SESSION_REDIS_PREFIX:-fnp_staging_sess:}
+
+  fastnetpay_nginx:
+    container_name: fastnetpay_staging_nginx
+    ports:
+      - "8080:80"
+      - "8443:443"
+
+volumes:
+  fastnetpay_staging_db_data:
+  fastnetpay_staging_redis_data:

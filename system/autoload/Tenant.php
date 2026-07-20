@@ -16,7 +16,7 @@ class Tenant
     private static $columnCache = [];
     private static $tenantCache = [];
     private static $settingsCache = [];
-    const SCHEMA_VERSION = '2026-07-09-perf1';
+    const SCHEMA_VERSION = '2026-07-20-perf2';
 
     public static function boot(&$config = [])
     {
@@ -194,18 +194,30 @@ class Tenant
             self::ensureIndex($table, 'idx_tenant_id', ['tenant_id']);
         }
         self::ensureIndex('tbl_routers', 'idx_tenant_status', ['tenant_id', 'status']);
+        self::ensureIndex('tbl_routers', 'idx_tenant_enabled_name', ['tenant_id', 'enabled', 'name']);
+        self::ensureIndex('tbl_routers', 'idx_tenant_vpn_status', ['tenant_id', 'vpn_status']);
         self::ensureIndex('tbl_customers', 'idx_tenant_status', ['tenant_id', 'status']);
         self::ensureIndex('tbl_customers', 'idx_tenant_username', ['tenant_id', 'username']);
         self::ensureIndex('tbl_customers', 'idx_tenant_phone', ['tenant_id', 'phonenumber']);
+        self::ensureIndex('tbl_customers', 'idx_tenant_service_status', ['tenant_id', 'service_type', 'status']);
         self::ensureIndex('tbl_transactions', 'idx_tenant_recharged', ['tenant_id', 'recharged_on']);
+        self::ensureIndex('tbl_transactions', 'idx_tenant_username_recharged', ['tenant_id', 'username', 'recharged_on']);
+        self::ensureIndex('tbl_transactions', 'idx_tenant_user_recharged', ['tenant_id', 'user_id', 'recharged_on']);
+        self::ensureIndex('tbl_transactions', 'idx_tenant_invoice', ['tenant_id', 'invoice']);
         self::ensureIndex('tbl_payment_gateway', 'idx_tenant_status_date', ['tenant_id', 'status', 'created_date']);
         self::ensureIndex('tbl_payment_gateway', 'idx_tenant_gateway_status', ['tenant_id', 'gateway', 'status']);
         self::ensureIndex('tbl_payment_gateway', 'idx_gateway_trx', ['gateway_trx_id']);
         self::ensureIndex('tbl_user_recharges', 'idx_tenant_status_type_expiry', ['tenant_id', 'status', 'type', 'expiration']);
         self::ensureIndex('tbl_user_recharges', 'idx_tenant_customer_expiry', ['tenant_id', 'customer_id', 'expiration']);
+        self::ensureIndex('tbl_user_recharges', 'idx_tenant_username_expiry', ['tenant_id', 'username', 'expiration']);
+        self::ensureIndex('tbl_voucher', 'idx_tenant_code_status', ['tenant_id', 'code', 'status']);
+        self::ensureIndex('tbl_voucher', 'idx_tenant_plan_status', ['tenant_id', 'id_plan', 'status']);
         self::ensureIndex('jovipay_transactions', 'idx_tenant_reference', ['tenant_id', 'account_reference']);
         self::ensureIndex('jovipay_transactions', 'idx_tenant_status', ['tenant_id', 'status']);
         self::ensureIndex('jovipay_transactions', 'idx_receipt_status', ['mpesa_receipt_number', 'status']);
+        self::ensureIndex('jovipay_transactions', 'idx_tenant_phone_status_created', ['tenant_id', 'phone', 'status', 'created_at']);
+        self::ensureIndex('jovipay_transactions', 'idx_tenant_mac_status_created', ['tenant_id', 'mac_address', 'status', 'created_at']);
+        self::ensureIndex('jovipay_transactions', 'idx_tenant_checkout', ['tenant_id', 'checkout_request_id']);
 
         self::seedSubscriptionPlans();
         self::migrateDefaultTenant();

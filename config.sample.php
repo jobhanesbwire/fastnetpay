@@ -38,3 +38,8 @@ $displayErrors = fastnetpay_env('APP_DISPLAY_ERRORS', $_app_stage !== 'Live' ? '
 ini_set('display_errors', $displayErrors ? '1' : '0');
 ini_set('display_startup_errors', $displayErrors ? '1' : '0');
 ini_set('log_errors', '1');
+
+$sessionName = preg_replace('/[^A-Za-z0-9_]/', '', (string) fastnetpay_env('SESSION_NAME', 'FASTNETPAYSESSID'));
+if ($sessionName !== '') {
+    session_name($sessionName);
+}

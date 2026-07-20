@@ -1,0 +1,14 @@
+[mysqld]
+# FASTNETPAY single-VPS production baseline for a 4 vCPU / ~6 GiB RAM VPS.
+# Revisit these values after real traffic and slow-query samples are available.
+innodb_buffer_pool_size=1G
+innodb_log_file_size=256M
+innodb_flush_method=O_DIRECT
+max_connections=250
+table_open_cache=4000
+tmp_table_size=64M
+max_heap_table_size=64M
+slow_query_log=ON
+long_query_time=1.5
+log_output=FILE
+skip_name_resolve=ON

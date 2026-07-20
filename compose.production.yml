@@ -1,0 +1,21 @@
+# Production override placeholder for docker-compose.prod.yml.
+#
+# Use:
+# FASTNETPAY_ENV_FILE=.env.production docker compose -f docker-compose.prod.yml -f compose.production.yml up -d
+#
+# This file intentionally avoids changing container names or ports because
+# docker-compose.prod.yml already describes the current production topology.
+# Add only production-specific labels or deployment overrides here.
+
+services:
+  fastnetpay_app:
+    environment:
+      APP_STAGE: Live
+      APP_ENV: production
+      APP_DISPLAY_ERRORS: "0"
+
+  fastnetpay_scheduler:
+    environment:
+      APP_STAGE: Live
+      APP_ENV: production
+      APP_DISPLAY_ERRORS: "0"

@@ -31,6 +31,42 @@ if ($scope === 'saas') {
     fnp_hotspot_json(['ok' => false, 'message' => 'SaaS payment API endpoint not found.'], 404);
 }
 
+if ($scope === 'health') {
+    fnp_hotspot_json([
+        'ok' => true,
+        'service' => 'FASTNETPAY',
+        'status' => 'healthy',
+        'time' => date('c'),
+    ]);
+}
+
+if ($scope === 'ready') {
+    $checks = ['database' => false, 'redis' => 'not_configured'];
+    try {
+        ORM::raw_execute('SELECT 1');
+        $checks['database'] = true;
+    } catch (Throwable $e) {
+        $checks['database_error'] = $e->getMessage();
+    }
+    if (getenv('SESSION_HANDLER') === 'redis') {
+        $checks['redis'] = false;
+        try {
+            if (class_exists('Redis')) {
+                $redis = new Redis();
+                $redis->connect(getenv('SESSION_REDIS_HOST') ?: 'fastnetpay_redis', (int) (getenv('SESSION_REDIS_PORT') ?: 6379), 1.5);
+                $checks['redis'] = $redis->ping() ? true : false;
+                $redis->close();
+            } else {
+                $checks['redis_error'] = 'Redis extension not installed';
+            }
+        } catch (Throwable $e) {
+            $checks['redis_error'] = $e->getMessage();
+        }
+    }
+    $ok = $checks['database'] === true && ($checks['redis'] === true || $checks['redis'] === 'not_configured');
+    fnp_hotspot_json(['ok' => $ok, 'service' => 'FASTNETPAY', 'status' => $ok ? 'ready' : 'not_ready', 'checks' => $checks], $ok ? 200 : 503);
+}
+
 if ($scope !== 'hotspot') {
     fnp_hotspot_json(['ok' => false, 'message' => 'API scope not found.'], 404);
 }

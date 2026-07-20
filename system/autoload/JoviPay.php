@@ -5,7 +5,7 @@ class JoviPay
     const SETTINGS_TABLE = 'jovipay_settings';
     const TX_TABLE = 'jovipay_transactions';
     const RECONNECT_TABLE = 'reconnection_attempts';
-    const SCHEMA_VERSION = '2026-07-09-perf1';
+    const SCHEMA_VERSION = '2026-07-20-perf2';
     private static $settingsCache = [];
 
     public static function installSchema()
@@ -92,6 +92,13 @@ class JoviPay
         self::ensureColumn(self::SETTINGS_TABLE, 'tenant_id', 'INT UNSIGNED NULL');
         self::ensureColumn(self::TX_TABLE, 'tenant_id', 'INT UNSIGNED NULL');
         self::ensureColumn(self::RECONNECT_TABLE, 'tenant_id', 'INT UNSIGNED NULL');
+        self::ensureIndex(self::TX_TABLE, 'idx_tenant_reference', ['tenant_id', 'account_reference']);
+        self::ensureIndex(self::TX_TABLE, 'idx_tenant_status_created', ['tenant_id', 'status', 'created_at']);
+        self::ensureIndex(self::TX_TABLE, 'idx_tenant_phone_status_created', ['tenant_id', 'phone', 'status', 'created_at']);
+        self::ensureIndex(self::TX_TABLE, 'idx_tenant_mac_status_created', ['tenant_id', 'mac_address', 'status', 'created_at']);
+        self::ensureIndex(self::TX_TABLE, 'idx_tenant_checkout', ['tenant_id', 'checkout_request_id']);
+        self::ensureIndex(self::TX_TABLE, 'idx_tenant_receipt', ['tenant_id', 'mpesa_receipt_number']);
+        self::ensureIndex(self::RECONNECT_TABLE, 'idx_tenant_tx_created', ['tenant_id', 'transaction_code', 'created_at']);
         if (class_exists('FastnetpayRuntime')) {
             FastnetpayRuntime::markSchemaFresh('jovipay', self::SCHEMA_VERSION);
         }
@@ -1919,6 +1926,33 @@ class JoviPay
             }
         } catch (Throwable $e) {
             _log('FASTNETPAY Jovi-Pay schema check failed: ' . $e->getMessage());
+        }
+    }
+
+    private static function ensureIndex($table, $index, $columns)
+    {
+        try {
+            $table = preg_replace('/[^a-zA-Z0-9_]/', '', (string) $table);
+            $index = preg_replace('/[^a-zA-Z0-9_]/', '', (string) $index);
+            $columns = array_values(array_filter(array_map(function ($column) {
+                return preg_replace('/[^a-zA-Z0-9_]/', '', (string) $column);
+            }, (array) $columns)));
+            if ($table === '' || $index === '' || !$columns) {
+                return;
+            }
+            foreach ($columns as $column) {
+                $exists = ORM::for_table($table)->raw_query("SHOW COLUMNS FROM `$table` LIKE ?", [$column])->find_one();
+                if (!$exists) {
+                    return;
+                }
+            }
+            $exists = ORM::for_table($table)->raw_query("SHOW INDEX FROM `$table` WHERE Key_name = ?", [$index])->find_one();
+            if ($exists) {
+                return;
+            }
+            ORM::raw_execute("ALTER TABLE `$table` ADD INDEX `$index` (`" . implode('`,`', $columns) . "`)");
+        } catch (Throwable $e) {
+            _log('FASTNETPAY Jovi-Pay index check failed: ' . $e->getMessage());
         }
     }
 

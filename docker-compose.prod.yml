@@ -12,12 +12,30 @@ services:
       TZ: ${TZ:-Africa/Nairobi}
     volumes:
       - fastnetpay_db_data:/var/lib/mysql
+      - ./.docker/mysql/mysql.prod.cnf:/etc/mysql/conf.d/fastnetpay.cnf:ro
       - ./install/phpnuxbill.sql:/docker-entrypoint-initdb.d/01-phpnuxbill.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} || mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 10
+    networks:
+      - fastnetpay_internal
+
+  fastnetpay_redis:
+    image: redis:7-alpine
+    container_name: fastnetpay_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - fastnetpay_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
     networks:
       - fastnetpay_internal
 
@@ -38,6 +56,12 @@ services:
       DB_NAME: ${DB_NAME:-fast_pay_net}
       DB_USER: ${DB_USER:-fastnetpay_app}
       DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      SESSION_NAME: ${SESSION_NAME:-FNP_PROD_SESSION}
+      SESSION_HANDLER: ${SESSION_HANDLER:-files}
+      SESSION_REDIS_HOST: fastnetpay_redis
+      SESSION_REDIS_PORT: 6379
+      SESSION_REDIS_DATABASE: ${SESSION_REDIS_DATABASE:-0}
+      SESSION_REDIS_PREFIX: ${SESSION_REDIS_PREFIX:-fnp_prod_sess:}
       TZ: ${TZ:-Africa/Nairobi}
     volumes:
       - ./system/uploads:/var/www/html/system/uploads
@@ -48,6 +72,8 @@ services:
       - fastnetpay_mpdf_tmp:/var/www/html/system/vendor/mpdf/mpdf/tmp
     depends_on:
       fastnetpay_db:
+        condition: service_healthy
+      fastnetpay_redis:
         condition: service_healthy
     expose:
       - "80"
@@ -70,6 +96,12 @@ services:
       DB_NAME: ${DB_NAME:-fast_pay_net}
       DB_USER: ${DB_USER:-fastnetpay_app}
       DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      SESSION_NAME: ${SESSION_NAME:-FNP_PROD_SESSION}
+      SESSION_HANDLER: ${SESSION_HANDLER:-files}
+      SESSION_REDIS_HOST: fastnetpay_redis
+      SESSION_REDIS_PORT: 6379
+      SESSION_REDIS_DATABASE: ${SESSION_REDIS_DATABASE:-0}
+      SESSION_REDIS_PREFIX: ${SESSION_REDIS_PREFIX:-fnp_prod_sess:}
       TZ: ${TZ:-Africa/Nairobi}
     command: ["bash", "-lc", "mkdir -p /var/log/fastnetpay && while true; do cd /var/www/html/system && php cron.php >> /var/log/fastnetpay/cron.log 2>&1; sleep ${FASTNETPAY_CRON_INTERVAL:-60}; done"]
     volumes:
@@ -82,6 +114,8 @@ services:
       - fastnetpay_cron_logs:/var/log/fastnetpay
     depends_on:
       fastnetpay_db:
+        condition: service_healthy
+      fastnetpay_redis:
         condition: service_healthy
     security_opt:
       - no-new-privileges:true
@@ -116,6 +150,7 @@ volumes:
   fastnetpay_qrcode_cache:
   fastnetpay_mpdf_tmp:
   fastnetpay_cron_logs:
+  fastnetpay_redis_data:
 
 networks:
   fastnetpay_internal:

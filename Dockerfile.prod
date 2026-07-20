@@ -29,6 +29,8 @@ RUN apt-get update \
         pdo \
         pdo_mysql \
         zip \
+    && pecl install redis \
+    && docker-php-ext-enable redis \
     && a2enmod rewrite headers remoteip expires \
     && rm -rf /var/lib/apt/lists/*
 

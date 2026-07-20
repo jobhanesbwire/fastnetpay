@@ -1,0 +1,19 @@
+# Optional local override:
+# docker compose -f docker-compose.yml -f compose.development.yml up -d --build
+
+services:
+  fastnetpay_app:
+    environment:
+      APP_ENV: development
+      APP_STAGE: Dev
+      APP_DISPLAY_ERRORS: "1"
+      SESSION_NAME: FNP_DEV_SESSION
+      SESSION_HANDLER: files
+
+  fastnetpay_db:
+    environment:
+      MYSQL_DATABASE: fast_pay_net
+
+  fastnetpay_pma:
+    environment:
+      PMA_ABSOLUTE_URI: http://localhost:8089/
